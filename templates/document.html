@@ -1,0 +1,41 @@
+{{define "content"}}
+<div class="container">
+  {{if .Doc}}
+  <div class="doc-viewer-header">
+    <div class="doc-meta" style="margin-bottom:.5rem">
+      {{if .Doc.Category}}<span class="tag">{{.Doc.Category}}</span>{{end}}
+      <span style="color:#888">थपिएको: {{.Doc.CreatedAt}}</span>
+      <a href="/document/{{.Doc.ID}}/edit" style="margin-left:auto;font-size:.82rem;outline:1px solid #ccc;padding:2px 8px;color:#555;text-decoration:none">सम्पादन</a>
+    </div>
+    <h1>{{.Doc.Title}}</h1>
+    {{if .Doc.TitleNP}}
+    <h2 style="font-family:'Hind',sans-serif;font-size:1.3rem;color:#555;font-weight:400;margin-top:0">
+      {{.Doc.TitleNP}}
+    </h2>
+    {{end}}
+    {{if .Doc.Description}}<p>{{.Doc.Description}}</p>{{end}}
+  </div>
+
+  {{/*
+    TODO: render the actual file.
+    .Doc.FilePath is the stored path/URL of the file.
+    For PDFs: embed with <object> or <iframe>.
+    For images: <img>.
+    For other types: offer a download link.
+  */}}
+  {{if .Doc.FilePath}}
+  <object class="pdf-embed" data="{{.Doc.FilePath}}" type="application/pdf">
+    <p>तपाईंको ब्राउजरले यो फाइल प्रदर्शन गर्न सक्दैन।
+    <a href="{{.Doc.FilePath}}">डाउनलोड गर्नुहोस् →</a></p>
+  </object>
+  {{else}}
+  <p style="color:#888;text-align:center;padding:3rem 0">
+    अहिलेसम्म कुनै फाइल थपिएको छैन।
+  </p>
+  {{end}}
+
+  {{else}}
+  <p style="color:#888;text-align:center;padding:4rem 0">कागजात भेटिएन।</p>
+  {{end}}
+</div>
+{{end}}

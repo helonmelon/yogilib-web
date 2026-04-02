@@ -1,0 +1,765 @@
+{{define "content"}}
+<!-- Quill.js rich text editor -->
+<link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet">
+<script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
+<script src="/static/js/preeti-unicode.js"></script>
+<script src="/static/js/itrans-unicode.js"></script>
+
+<style>
+  /* ── Page layout ─────────────────────────────────────────── */
+  .contribute-page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem 1rem 4rem;
+  }
+  .contribute-page h1 {
+    font-family: 'Labrada', serif;
+    font-size: 2rem;
+    text-align: center;
+    margin-bottom: 0.25rem;
+    color: var(--accent, #8b3a3a);
+  }
+  .contribute-page .subtitle {
+    text-align: center;
+    color: #666;
+    margin-bottom: 2.5rem;
+    font-size: 0.95rem;
+  }
+
+  /* ── Flash banners ───────────────────────────────────────── */
+  .flash { border-radius: 6px; padding: 0.9rem 1.2rem; margin-bottom: 1.5rem; font-size: 0.95rem; }
+  .flash-ok  { background: #d4edda; color: #1d6a31; border-left: 4px solid #28a745; }
+  .flash-err { background: #f8d7da; color: #842029; border-left: 4px solid #dc3545; }
+
+  /* ── Form card ───────────────────────────────────────────── */
+  .editor-card {
+    background: #fff;
+    border: 1px solid #e8ddd0;
+    border-radius: 12px;
+    padding: 2rem;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.06);
+  }
+
+  /* ── Form groups ─────────────────────────────────────────── */
+  .fg { margin-bottom: 1.5rem; }
+  .fg label {
+    display: block;
+    font-weight: 600;
+    font-size: 0.88rem;
+    margin-bottom: 0.45rem;
+    color: #444;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .fg input, .fg select {
+    width: 100%;
+    padding: 0.65rem 0.9rem;
+    border: 1.5px solid #ddd;
+    border-radius: 7px;
+    font-size: 1rem;
+    font-family: inherit;
+    background: #fafafa;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+  }
+  .fg input:focus, .fg select:focus {
+    outline: none;
+    border-color: var(--accent, #8b3a3a);
+    background: #fff;
+  }
+  .fg .hint { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
+
+  /* ── Two-column grid for titles ──────────────────────────── */
+  .fg-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
+  .fg-row-3 { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 1rem; }
+  @media (max-width: 600px) { .fg-row { grid-template-columns: 1fr; } .fg-row-3 { grid-template-columns: 1fr; } }
+
+  /* ── Auto-date notice ────────────────────────────────────── */
+  .auto-date-notice {
+    display: flex; align-items: center; gap: 0.6rem;
+    background: #f0f7ff; border: 1px solid #c3d9f5;
+    border-radius: 7px; padding: 0.6rem 0.9rem;
+    font-size: 0.83rem; color: #2d5f8a; margin-bottom: 1.5rem;
+  }
+  .auto-date-notice .adt-icon { font-size: 1rem; }
+
+  /* ── Author info box ─────────────────────────────────────── */
+  .author-section {
+    border: 1.5px solid #e2d5c5; border-radius: 10px;
+    padding: 1.2rem 1.5rem; margin-bottom: 1.5rem;
+    background: #fdfaf6;
+  }
+  .author-section h4 {
+    font-size: 0.82rem; font-weight: 700; color: #7a4a1e;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    margin: 0 0 1rem;
+  }
+  .uploader-note {
+    font-size: 0.8rem; color: #888; margin-top: 0.4rem;
+    padding: 0.5rem 0.8rem; background: #f5f5f5;
+    border-radius: 5px; border-left: 3px solid #ccc;
+  }
+
+  /* ── Nepali input with toggle ────────────────────────────── */
+  .np-wrap { position: relative; }
+  .np-wrap input { padding-right: 7rem; }
+  .np-badge {
+    position: absolute; right: 0.5rem; top: 50%;
+    transform: translateY(-50%);
+    display: flex; gap: 4px;
+  }
+  .np-badge button {
+    font-size: 0.7rem; padding: 2px 7px; border: 1px solid #ccc;
+    border-radius: 4px; background: #f0f0f0; cursor: pointer;
+    font-family: inherit; transition: all 0.15s;
+  }
+  .np-badge button.active { background: var(--accent,#8b3a3a); color: #fff; border-color: var(--accent,#8b3a3a); }
+
+  /* ── Preeti converter panel ──────────────────────────────── */
+  .preeti-panel {
+    margin-top: 1.8rem;
+    border: 1.5px dashed #c9a07a;
+    border-radius: 10px;
+    padding: 1.2rem 1.5rem;
+    background: #fffbf6;
+  }
+  .preeti-panel h3 {
+    font-size: 0.95rem;
+    font-weight: 700;
+    margin: 0 0 0.8rem;
+    color: #7a4a1e;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .preeti-panel h3 .badge-preeti {
+    font-size: 0.7rem;
+    background: #c9a07a; color: #fff;
+    padding: 1px 7px; border-radius: 20px;
+    font-weight: 600; letter-spacing: 0.05em;
+  }
+  .preeti-io { display: grid; grid-template-columns: 1fr auto 1fr; gap: 0.8rem; align-items: start; }
+  @media(max-width:600px){ .preeti-io { grid-template-columns: 1fr; } .preeti-arrow{ display:none; } }
+  .preeti-io textarea {
+    width: 100%; min-height: 100px; resize: vertical;
+    border: 1.5px solid #ddd; border-radius: 7px;
+    padding: 0.6rem 0.8rem; font-size: 0.95rem;
+    font-family: 'Preeti', monospace, serif;
+    background: #fefefe; box-sizing: border-box; line-height: 1.6;
+  }
+  .preeti-io textarea#uni-output {
+    font-family: 'Hind', sans-serif;
+    background: #f8f8f8;
+  }
+  .preeti-arrow { display: flex; align-items: center; justify-content: center; color: #c9a07a; font-size: 1.5rem; padding-top: 1rem; }
+  .preeti-actions { display: flex; gap: 0.6rem; margin-top: 0.8rem; flex-wrap: wrap; }
+  .preeti-actions button {
+    font-size: 0.85rem; padding: 0.45rem 1rem; border-radius: 6px; cursor: pointer;
+    border: 1.5px solid; font-family: inherit; font-weight: 600; transition: all 0.15s;
+  }
+  .btn-convert { background: #7a4a1e; color: #fff; border-color: #7a4a1e; }
+  .btn-convert:hover { background: #5c3212; }
+  .btn-insert  { background: transparent; color: #7a4a1e; border-color: #c9a07a; }
+  .btn-insert:hover  { background: #f5e6d3; }
+
+  /* ── Rich text editor ────────────────────────────────────── */
+  .editor-label {
+    font-weight: 600; font-size: 0.88rem; color: #444;
+    letter-spacing: 0.02em; text-transform: uppercase; margin-bottom: 0.5rem;
+  }
+  .editor-lang-bar {
+    display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center;
+  }
+  .editor-lang-bar span { font-size: 0.8rem; color: #888; }
+  .editor-lang-bar button {
+    font-size: 0.78rem; padding: 3px 10px; border-radius: 4px;
+    border: 1.5px solid #ddd; background: #f5f5f5; cursor: pointer;
+    font-family: inherit; transition: all 0.15s;
+  }
+  .editor-lang-bar button.active { background: var(--accent,#8b3a3a); color: #fff; border-color: var(--accent,#8b3a3a); }
+
+  #editor-container {
+    border: 1.5px solid #ddd; border-radius: 0 0 8px 8px;
+    min-height: 320px; font-size: 1.05rem;
+    background: #fff;
+  }
+  .ql-toolbar.ql-snow {
+    border: 1.5px solid #ddd;
+    border-radius: 8px 8px 0 0;
+    background: #fafafa;
+  }
+  .ql-container.ql-snow { border: none; }
+  .ql-editor { min-height: 280px; font-family: 'Hind', sans-serif; line-height: 1.8; }
+  .ql-editor[lang="ne"] { font-family: 'Hind', 'Noto Sans Devanagari', sans-serif; }
+
+  /* Char counter */
+  .char-info { font-size: 0.78rem; color: #999; text-align: right; margin-top: 0.3rem; }
+
+  /* ── Drop zone ───────────────────────────────────────────── */
+  .drop-zone {
+    border: 2px dashed #c9a07a; border-radius: 10px;
+    padding: 2rem 1rem; text-align: center; cursor: pointer;
+    transition: all 0.2s; color: #888; font-size: 0.95rem;
+    background: #fffdf9;
+  }
+  .drop-zone:hover, .drop-zone.dragging { background: #fff5e8; border-color: #8b3a3a; color: #8b3a3a; }
+  .drop-zone .dz-icon { font-size: 2rem; display: block; margin-bottom: 0.4rem; }
+
+  /* ── Submit area ─────────────────────────────────────────── */
+  .submit-area { display: flex; gap: 1rem; justify-content: flex-end; margin-top: 2rem; flex-wrap: wrap; }
+  .btn-primary {
+    background: var(--accent, #8b3a3a); color: #fff;
+    border: none; border-radius: 8px; padding: 0.75rem 2rem;
+    font-size: 1rem; font-family: inherit; font-weight: 700;
+    cursor: pointer; transition: background 0.2s;
+  }
+  .btn-primary:hover { background: #6d2a2a; }
+  .btn-secondary {
+    background: transparent; color: #555;
+    border: 1.5px solid #ccc; border-radius: 8px;
+    padding: 0.75rem 1.5rem; font-size: 0.95rem;
+    font-family: inherit; cursor: pointer; transition: all 0.2s;
+  }
+  .btn-secondary:hover { border-color: #888; color: #333; }
+
+  /* ── Section divider ─────────────────────────────────────── */
+  .section-divider {
+    display: flex; align-items: center; gap: 1rem; margin: 2rem 0 1.5rem;
+    color: #aaa; font-size: 0.85rem;
+  }
+  .section-divider::before, .section-divider::after {
+    content: ''; flex: 1; height: 1px; background: #e5e5e5;
+  }
+
+  /* ── Tabs ────────────────────────────────────────────────── */
+  .editor-tabs { display: flex; gap: 0; margin-bottom: 0; border-bottom: none; }
+  .editor-tabs button {
+    flex: 1; padding: 0.6rem 1rem;
+    border: 1.5px solid #ddd; background: #f5f5f5;
+    font-family: inherit; font-size: 0.88rem; cursor: pointer;
+    transition: all 0.15s; font-weight: 600; color: #666;
+  }
+  .editor-tabs button:first-child { border-radius: 8px 0 0 0; }
+  .editor-tabs button:last-child  { border-radius: 0 8px 0 0; }
+  .editor-tabs button.active {
+    background: #fff; color: var(--accent,#8b3a3a);
+    border-bottom-color: #fff; border-top-color: var(--accent,#8b3a3a);
+    z-index: 1;
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+</style>
+
+<div class="contribute-page">
+  <h1>योगदान गर्नुहोस्</h1>
+  <p class="subtitle">Contribute a document, book, record, or article to the Yogilib archive.</p>
+
+  {{if .Flash}}
+  <div class="flash flash-ok">{{.Flash}}</div>
+  {{end}}
+  {{if .Error}}
+  <div class="flash flash-err">{{.Error}}</div>
+  {{end}}
+
+  <form id="upload-form" class="editor-card" method="POST" action="/upload" enctype="multipart/form-data">
+    <!-- Hidden field: rich editor output -->
+    <input type="hidden" id="body-html" name="body_html">
+    <input type="hidden" id="body-text" name="body_text">
+
+    <!-- ── Titles ──────────────────────────────────────────── -->
+    <div class="fg-row">
+      <div class="fg">
+        <label for="title">Title (English)</label>
+        <input type="text" id="title" name="title" required
+               placeholder="e.g. Treaty of Sugowlee, 1815">
+      </div>
+      <div class="fg">
+        <label for="title_np">शीर्षक (नेपाली)</label>
+        <div class="np-wrap">
+          <input type="text" id="title_np" name="title_np"
+                 placeholder="उदाहरण: सुगौली सन्धि">
+          <div class="np-badge">
+            <button type="button" id="np-unicode-btn" class="active" title="Type in Unicode Nepali">युनि</button>
+            <button type="button" id="np-preeti-btn" title="Type in Preeti (auto-converts)">Preeti</button>
+          </div>
+        </div>
+        <div class="hint">Typing mode: <span id="np-mode-label">Unicode (direct)</span></div>
+      </div>
+    </div>
+
+    <!-- ── Category ────────────────────────────────────────── -->
+    <div class="fg">
+      <label for="category">वर्ग / Category</label>
+      <select id="category" name="category" required>
+        <option value="">— छान्नुहोस् / Select —</option>
+        <option value="किताब">किताब (Book)</option>
+        <option value="कागजात">कागजात (Document)</option>
+        <option value="रेकर्ड">रेकर्ड (Record)</option>
+        <option value="पत्रिका">पत्रिका (Journal)</option>
+        <option value="अंश">अंश (Excerpt)</option>
+        <option value="अन्य">अन्य (Other)</option>
+      </select>
+    </div>
+
+    <!-- ── Language ───────────────────────────────────────── -->
+    <div class="fg-row">
+      <div class="fg">
+        <label for="doc_lang">भाषा / Language</label>
+        <select id="doc_lang" name="doc_lang">
+          <option value="">— Select language —</option>
+          <option value="en">English</option>
+          <option value="ne">नेपाली (Nepali)</option>
+          <option value="sa">संस्कृत (Sanskrit)</option>
+          <option value="ne-sa">नेपाली + संस्कृत (Bilingual)</option>
+          <option value="mixed">Mixed / बहुभाषिक</option>
+          <option value="other">Other</option>
+        </select>
+        <div class="hint">The primary language of the original document.</div>
+      </div>
+      <div class="fg">
+        <label for="script">लिपि / Script</label>
+        <select id="script" name="script">
+          <option value="">— Select script —</option>
+          <option value="devanagari">देवनागरी (Devanagari)</option>
+          <option value="latin">Latin / Roman</option>
+          <option value="iast">Latin IAST (romanized Sanskrit)</option>
+          <option value="mixed">Mixed scripts</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- ── Original Date ──────────────────────────────────── -->
+    <div class="auto-date-notice">
+      <span class="adt-icon">🗓️</span>
+      <span><strong>Upload date</strong> is recorded automatically when you submit. Use the fields below for the document's <em>original</em> date.</span>
+    </div>
+    <div class="fg-row-3">
+      <div class="fg">
+        <label for="orig_year">Original Year / मूल वर्ष</label>
+        <input type="text" id="orig_year" name="orig_year" placeholder="e.g. 1815 or १८७२">
+      </div>
+      <div class="fg">
+        <label for="orig_month">Month / महिना</label>
+        <select id="orig_month" name="orig_month">
+          <option value="">— Month —</option>
+          <option value="01">January / जनवरी</option>
+          <option value="02">February / फेब्रुअरी</option>
+          <option value="03">March / मार्च</option>
+          <option value="04">April / अप्रिल</option>
+          <option value="05">May / मे</option>
+          <option value="06">June / जुन</option>
+          <option value="07">July / जुलाई</option>
+          <option value="08">August / अगस्ट</option>
+          <option value="09">September / सेप्टेम्बर</option>
+          <option value="10">October / अक्टोबर</option>
+          <option value="11">November / नोभेम्बर</option>
+          <option value="12">December / डिसेम्बर</option>
+        </select>
+      </div>
+      <div class="fg">
+        <label for="orig_day">Day / दिन</label>
+        <input type="number" id="orig_day" name="orig_day" min="1" max="31" placeholder="e.g. 2">
+      </div>
+    </div>
+
+    <!-- ── Author ──────────────────────────────────────────── -->
+    <div class="author-section">
+      <h4>✍️ Authorship / लेखक विवरण</h4>
+      <div class="fg-row">
+        <div class="fg" style="margin-bottom:0">
+          <label for="orig_author">Original Author / मूल लेखक</label>
+          <input type="text" id="orig_author" name="orig_author"
+                 placeholder="e.g. Yogi Narharinath / योगी नरहरिनाथ">
+          <div class="hint">Who originally wrote or compiled this document.</div>
+        </div>
+        <div class="fg" style="margin-bottom:0">
+          <label for="orig_author_np">Original Author (नेपाली)</label>
+          <div class="np-wrap">
+            <input type="text" id="orig_author_np" name="orig_author_np"
+                   placeholder="उदाहरण: योगी नरहरिनाथ">
+            <div class="np-badge">
+              <button type="button" id="au-unicode-btn" class="active" title="Unicode">युनि</button>
+              <button type="button" id="au-preeti-btn" title="Preeti">Preeti</button>
+            </div>
+          </div>
+          <div class="hint">Typing mode: <span id="au-mode-label">Unicode (direct)</span></div>
+        </div>
+      </div>
+      <div class="uploader-note">
+        📌 <strong>Uploaded by:</strong> The account that submits this form will be automatically recorded as the contributor once user authentication is enabled.
+      </div>
+    </div>
+
+    <!-- ── Rich Text Editor ────────────────────────────────── -->
+    <div class="section-divider">Rich Text Content / सामग्री</div>
+
+    <div class="fg">
+      <div class="editor-label">Content Body</div>
+
+      <!-- Language / mode bar -->
+      <div class="editor-lang-bar">
+        <span>Language:</span>
+        <button type="button" id="lang-en" class="active" data-lang="en">English</button>
+        <button type="button" id="lang-ne" data-lang="ne">नेपाली</button>
+        <button type="button" id="lang-sa" data-lang="sa">संस्कृत (Sanskrit)</button>
+        <button type="button" id="lang-mixed" data-lang="mixed">Mixed</button>
+      </div>
+
+      <!-- Quill editor tabs: Visual / Source -->
+      <div class="editor-tabs">
+        <button type="button" id="tab-visual" class="active" onclick="switchTab('visual')">✏️ Visual Editor</button>
+        <button type="button" id="tab-source" onclick="switchTab('source')">〈/〉 HTML Source</button>
+      </div>
+
+      <div id="panel-visual" class="tab-panel active">
+        <div id="editor-container"></div>
+        <div class="char-info"><span id="char-count">0</span> characters</div>
+      </div>
+      <div id="panel-source" class="tab-panel">
+        <textarea id="html-source" style="width:100%;min-height:280px;font-family:monospace;font-size:0.85rem;border:1.5px solid #ddd;border-radius:0 0 8px 8px;padding:0.8rem;box-sizing:border-box;resize:vertical;"></textarea>
+      </div>
+    </div>
+
+    <!-- ── Script Converters (tabbed: Preeti | ITRANS) ──────── -->
+    <div class="preeti-panel" id="converter-panel">
+      <h3>🔠 Script Converters <span class="badge-preeti" style="background:#7a4a1e">TOOLS</span></h3>
+      <p style="font-size:0.82rem;color:#7a4a1e;margin:0 0 0.8rem;">
+        Convert old encoding schemes to proper Unicode Devanagari, then insert into the editor.
+      </p>
+
+      <!-- Converter tabs -->
+      <div style="display:flex;gap:0;margin-bottom:1rem;">
+        <button type="button" id="cv-preeti-tab"
+          style="flex:1;padding:0.45rem;border:1.5px solid #c9a07a;border-radius:6px 0 0 6px;background:#7a4a1e;color:#fff;font-family:inherit;font-size:0.82rem;font-weight:700;cursor:pointer;"
+          onclick="switchConverter('preeti')">
+          🇳 Preeti → Unicode (नेपाली)
+        </button>
+        <button type="button" id="cv-itrans-tab"
+          style="flex:1;padding:0.45rem;border:1.5px solid #c9a07a;border-radius:0 6px 6px 0;background:#f5ede3;color:#7a4a1e;font-family:inherit;font-size:0.82rem;font-weight:700;cursor:pointer;"
+          onclick="switchConverter('itrans')">
+          🕉️ ITRANS → Devanagari (संस्कृत)
+        </button>
+      </div>
+
+      <!-- Preeti pane -->
+      <div id="cv-preeti">
+        <p style="font-size:0.79rem;color:#888;margin:0 0 0.6rem;">
+          For Nepali text typed in <strong>Preeti font</strong> (old MS Word, OCR).
+        </p>
+        <div class="preeti-io">
+          <div>
+            <div style="font-size:0.8rem;font-weight:600;color:#7a4a1e;margin-bottom:0.3rem;">Preeti Input</div>
+            <textarea id="preeti-input" placeholder="Paste Preeti text here…&#10;e.g. k'/n ;doGjoy sfo{qmd"></textarea>
+          </div>
+          <div class="preeti-arrow">→</div>
+          <div>
+            <div style="font-size:0.8rem;font-weight:600;color:#7a4a1e;margin-bottom:0.3rem;">Unicode Output (नेपाली)</div>
+            <textarea id="uni-output" readonly placeholder="Converted Unicode will appear here…"></textarea>
+          </div>
+        </div>
+        <div class="preeti-actions">
+          <button type="button" class="btn-convert" onclick="runPreetiConvert()">⟳ Convert</button>
+          <button type="button" class="btn-insert" onclick="insertFromConverter('preeti')">↑ Insert into Editor</button>
+          <button type="button" class="btn-insert" onclick="clearConverter('preeti')">✕ Clear</button>
+        </div>
+      </div>
+
+      <!-- ITRANS pane -->
+      <div id="cv-itrans" style="display:none;">
+        <p style="font-size:0.79rem;color:#888;margin:0 0 0.6rem;">
+          For <strong>Sanskrit</strong> (and Nepali) in <strong>ITRANS</strong> — ASCII transliteration used in academic Sanskrit texts.<br>
+          Examples: <code>dharma</code> → धर्म &nbsp;|&nbsp; <code>namaH</code> → नमः &nbsp;|&nbsp; <code>saMskRRitam</code> → संस्कृतम् &nbsp;|&nbsp; <code>OM</code> → ॐ
+        </p>
+        <div class="preeti-io">
+          <div>
+            <div style="font-size:0.8rem;font-weight:600;color:#7a4a1e;margin-bottom:0.3rem;">ITRANS Input (Sanskrit)</div>
+            <textarea id="itrans-input" placeholder="Type or paste ITRANS here…&#10;e.g. namaH shivAya&#10;dharmaH rakShati rakShitaH"></textarea>
+          </div>
+          <div class="preeti-arrow">→</div>
+          <div>
+            <div style="font-size:0.8rem;font-weight:600;color:#7a4a1e;margin-bottom:0.3rem;">Devanagari Output</div>
+            <textarea id="itrans-output" readonly placeholder="Converted Devanagari will appear here…"></textarea>
+          </div>
+        </div>
+        <div class="preeti-actions">
+          <button type="button" class="btn-convert" onclick="runItransConvert()">⟳ Convert</button>
+          <button type="button" class="btn-insert" onclick="insertFromConverter('itrans')">↑ Insert into Editor</button>
+          <button type="button" class="btn-insert" onclick="clearConverter('itrans')">✕ Clear</button>
+        </div>
+        <div style="font-size:0.76rem;color:#aaa;margin-top:0.8rem;line-height:1.7;">
+          📚 Quick ref: <strong>k kh g gh c ch j jh T Th D Dh N t th d dh n p ph b bh m y r l v s sh Sh h</strong> = consonants<br>
+          <strong>a A i I u U e o ai au</strong> = vowels &nbsp;|&nbsp;
+          <strong>M H</strong> = anusvara/visarga &nbsp;|&nbsp;
+          <strong>kSh GY</strong> = क्ष ज्ञ &nbsp;|&nbsp;
+          <strong>| ||</strong> = । ॥ &nbsp;|&nbsp; <strong>OM</strong> = ॐ
+        </div>
+      </div>
+    </div>
+
+    <!-- ── File Upload ─────────────────────────────────────── -->
+    <div class="section-divider">Attachment / संलग्न फाइल</div>
+
+    <div class="fg">
+      <label>फाइल (PDF, Image, Word…) — Optional</label>
+      <div class="drop-zone" id="drop-zone">
+        <span class="dz-icon">📄</span>
+        <span id="drop-label">Drag & drop file here, or click to browse</span>
+        <input type="file" id="file" name="file" style="display:none"
+               accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.tif,.tiff">
+      </div>
+      <div class="hint">Accepted: PDF, Word, JPEG, PNG, TIFF. Max 50 MB.</div>
+    </div>
+
+    <!-- ── Submit ──────────────────────────────────────────── -->
+    <div class="submit-area">
+      <button type="button" class="btn-secondary" onclick="history.back()">Cancel</button>
+      <button type="submit" class="btn-primary">📤 अपलोड गर्नुहोस्</button>
+    </div>
+  </form>
+</div>
+
+<!-- ============================================================
+     JavaScript
+     ============================================================ -->
+<script>
+// ── Quill setup ──────────────────────────────────────────────
+const toolbarOptions = [
+  // Heading / text style
+  [{ 'header': [1, 2, 3, 4, false] }],
+  [{ 'font': [] }],
+  [{ 'size': ['small', false, 'large', 'huge'] }],
+
+  // Formatting
+  ['bold', 'italic', 'underline', 'strike'],
+  [{ 'color': [] }, { 'background': [] }],
+  [{ 'script': 'sub' }, { 'script': 'super' }],
+
+  // Structure
+  [{ 'list': 'ordered' }, { 'list': 'bullet' }, { 'list': 'check' }],
+  [{ 'indent': '-1' }, { 'indent': '+1' }],
+  [{ 'align': [] }],
+  ['blockquote', 'code-block'],
+
+  // Media / links
+  ['link', 'image'],
+  ['clean'],
+];
+
+const quill = new Quill('#editor-container', {
+  theme: 'snow',
+  placeholder: 'Start typing your content here. Use the toolbar for formatting — headings, bold, lists, blockquotes and more…',
+  modules: { toolbar: toolbarOptions },
+});
+
+// Live char count
+quill.on('text-change', () => {
+  const len = quill.getLength() - 1;
+  document.getElementById('char-count').textContent = Math.max(0, len);
+});
+
+// ── Tab switcher (Visual ↔ Source) ────────────────────────────
+function switchTab(tab) {
+  const visual = document.getElementById('panel-visual');
+  const source = document.getElementById('panel-source');
+  const tabV   = document.getElementById('tab-visual');
+  const tabS   = document.getElementById('tab-source');
+  const srcTA  = document.getElementById('html-source');
+
+  if (tab === 'visual') {
+    // Sync source → quill before switching back
+    quill.clipboard.dangerouslyPasteHTML(srcTA.value);
+    visual.classList.add('active');
+    source.classList.remove('active');
+    tabV.classList.add('active');
+    tabS.classList.remove('active');
+  } else {
+    // Sync quill → source
+    srcTA.value = quill.root.innerHTML;
+    visual.classList.remove('active');
+    source.classList.add('active');
+    tabV.classList.remove('active');
+    tabS.classList.add('active');
+  }
+}
+
+// ── Language bar ─────────────────────────────────────────────
+document.querySelectorAll('.editor-lang-bar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.editor-lang-bar button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const lang = btn.dataset.lang;
+    quill.root.setAttribute('lang', lang === 'ne' ? 'ne' : 'en');
+    // When switching to Nepali, remind user about IME
+    if (lang === 'ne') {
+      quill.root.setAttribute('autocomplete', 'off');
+      quill.root.setAttribute('autocorrect', 'off');
+      quill.root.setAttribute('spellcheck', 'false');
+    }
+  });
+});
+
+// ── Nepali title field: Preeti auto-typing mode ───────────────
+const titleNpInput = document.getElementById('title_np');
+const npUnicodeBtn = document.getElementById('np-unicode-btn');
+const npPreetiBtn  = document.getElementById('np-preeti-btn');
+const npModeLabel  = document.getElementById('np-mode-label');
+let npMode = 'unicode'; // 'unicode' | 'preeti'
+
+npUnicodeBtn.addEventListener('click', () => {
+  npMode = 'unicode';
+  npUnicodeBtn.classList.add('active');
+  npPreetiBtn.classList.remove('active');
+  npModeLabel.textContent = 'Unicode (direct)';
+  titleNpInput.placeholder = 'उदाहरण: सुगौली सन्धि';
+});
+
+npPreetiBtn.addEventListener('click', () => {
+  npMode = 'preeti';
+  npPreetiBtn.classList.add('active');
+  npUnicodeBtn.classList.remove('active');
+  npModeLabel.textContent = 'Preeti → Unicode (live convert)';
+  titleNpInput.placeholder = 'Type Preeti keys — auto-converts to Unicode';
+  titleNpInput.value = '';
+});
+
+// Live Preeti typing in the title field
+titleNpInput.addEventListener('keydown', (e) => {
+  if (npMode !== 'preeti') return;
+  const ch = e.key;
+  if (ch.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    const converted = preetiToUnicode(ch);
+    const start = titleNpInput.selectionStart;
+    const end   = titleNpInput.selectionEnd;
+    const val   = titleNpInput.value;
+    titleNpInput.value = val.slice(0, start) + converted + val.slice(end);
+    titleNpInput.selectionStart = titleNpInput.selectionEnd = start + converted.length;
+  }
+});
+
+// ── Author Nepali field: Preeti toggle ────────────────────────
+const authorNpInput = document.getElementById('orig_author_np');
+const auUnicodeBtn  = document.getElementById('au-unicode-btn');
+const auPreetiBtn   = document.getElementById('au-preeti-btn');
+const auModeLabel   = document.getElementById('au-mode-label');
+let auMode = 'unicode';
+
+auUnicodeBtn.addEventListener('click', () => {
+  auMode = 'unicode';
+  auUnicodeBtn.classList.add('active');
+  auPreetiBtn.classList.remove('active');
+  auModeLabel.textContent = 'Unicode (direct)';
+  authorNpInput.placeholder = 'उदाहरण: योगी नरहरिनाथ';
+});
+
+auPreetiBtn.addEventListener('click', () => {
+  auMode = 'preeti';
+  auPreetiBtn.classList.add('active');
+  auUnicodeBtn.classList.remove('active');
+  auModeLabel.textContent = 'Preeti → Unicode (live convert)';
+  authorNpInput.placeholder = 'Type Preeti keys — auto-converts to Unicode';
+  authorNpInput.value = '';
+});
+
+authorNpInput.addEventListener('keydown', (e) => {
+  if (auMode !== 'preeti') return;
+  const ch = e.key;
+  if (ch.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    const converted = preetiToUnicode(ch);
+    const start = authorNpInput.selectionStart;
+    const end   = authorNpInput.selectionEnd;
+    const val   = authorNpInput.value;
+    authorNpInput.value = val.slice(0, start) + converted + val.slice(end);
+    authorNpInput.selectionStart = authorNpInput.selectionEnd = start + converted.length;
+  }
+});
+
+// ── Converter panel: tab switcher ────────────────────────────
+function switchConverter(mode) {
+  const preetiTab  = document.getElementById('cv-preeti-tab');
+  const itransTab  = document.getElementById('cv-itrans-tab');
+  const preetiPane = document.getElementById('cv-preeti');
+  const itransPane = document.getElementById('cv-itrans');
+
+  const activeStyle   = { background: '#7a4a1e', color: '#fff' };
+  const inactiveStyle = { background: '#f5ede3', color: '#7a4a1e' };
+
+  if (mode === 'preeti') {
+    Object.assign(preetiTab.style, activeStyle);
+    Object.assign(itransTab.style, inactiveStyle);
+    preetiPane.style.display = '';
+    itransPane.style.display = 'none';
+  } else {
+    Object.assign(itransTab.style, activeStyle);
+    Object.assign(preetiTab.style, inactiveStyle);
+    itransPane.style.display = '';
+    preetiPane.style.display = 'none';
+  }
+}
+
+// ── Preeti converter ──────────────────────────────────────────
+function runPreetiConvert() {
+  const raw = document.getElementById('preeti-input').value;
+  document.getElementById('uni-output').value = preetiToUnicode(raw);
+}
+document.getElementById('preeti-input').addEventListener('input', runPreetiConvert);
+
+// ── ITRANS converter ──────────────────────────────────────────
+function runItransConvert() {
+  const raw = document.getElementById('itrans-input').value;
+  document.getElementById('itrans-output').value = itransToUnicode(raw);
+}
+document.getElementById('itrans-input').addEventListener('input', runItransConvert);
+
+// ── Shared: insert into editor / clear ───────────────────────
+function insertFromConverter(mode) {
+  const outputId = mode === 'preeti' ? 'uni-output' : 'itrans-output';
+  const text = document.getElementById(outputId).value;
+  if (!text) return;
+  const range = quill.getSelection(true);
+  quill.insertText(range.index, text, 'user');
+  quill.setSelection(range.index + text.length);
+}
+
+function clearConverter(mode) {
+  if (mode === 'preeti') {
+    document.getElementById('preeti-input').value = '';
+    document.getElementById('uni-output').value = '';
+  } else {
+    document.getElementById('itrans-input').value = '';
+    document.getElementById('itrans-output').value = '';
+  }
+}
+
+// Legacy alias kept for any inline onclick references
+function insertIntoEditor() { insertFromConverter('preeti'); }
+
+// ── Drop zone ─────────────────────────────────────────────────
+const zone  = document.getElementById('drop-zone');
+const input = document.getElementById('file');
+const label = document.getElementById('drop-label');
+
+zone.addEventListener('click', () => input.click());
+input.addEventListener('change', () => {
+  if (input.files[0]) {
+    label.textContent = '✅ ' + input.files[0].name;
+    zone.style.borderColor = '#28a745';
+  }
+});
+zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragging'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('dragging'));
+zone.addEventListener('drop', e => {
+  e.preventDefault(); zone.classList.remove('dragging');
+  if (e.dataTransfer.files[0]) {
+    input.files = e.dataTransfer.files;
+    label.textContent = '✅ ' + e.dataTransfer.files[0].name;
+    zone.style.borderColor = '#28a745';
+  }
+});
+
+// ── Form submit: inject editor content ────────────────────────
+document.getElementById('upload-form').addEventListener('submit', () => {
+  document.getElementById('body-html').value = quill.root.innerHTML;
+  document.getElementById('body-text').value = quill.getText();
+});
+</script>
+{{end}}

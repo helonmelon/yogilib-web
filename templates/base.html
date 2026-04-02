@@ -1,0 +1,50 @@
+{{define "base"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.Title}} — Yogilib</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Labrada:ital,wght@0,400;0,600;1,400&family=Hind:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  {{/* Admin bar — shown only when user is logged in.
+       TODO: pass .User from session/auth middleware and render conditionally. */}}
+  {{if .User}}
+  <div class="admin-bar">
+    <span>{{.User.Email}}</span>
+    <a href="/dashboard">ड्यासबोर्ड</a>
+    <a href="/upload">अपलोड</a>
+    <a href="/logout">बाहिर</a>
+  </div>
+  {{end}}
+
+  <div class="container">
+
+    <header class="site-header">
+      <a href="/" class="photo-link"><img src="/static/imgs/yogipp.jpeg" alt="Yogi Narharinath"></a>
+    </header>
+
+    <nav class="site-nav">
+      <a href="/about">बारेमा</a>
+      <a href="/works">ग्रन्थावली</a>
+      <a href="/upload" class="contribute">योगदान</a>
+    </nav>
+
+    <main>
+      {{template "content" .}}
+    </main>
+
+  </div>
+
+  <footer>
+    <p>Yogilib — योगी नरहरिनाथको स्मृतिमा (१९७१–२०५९)</p>
+    <p>yogilib108@gmail.com</p>
+  </footer>
+
+</body>
+</html>
+{{end}}

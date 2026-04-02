@@ -1,0 +1,40 @@
+{{define "content"}}
+<section class="doc-section">
+  <h2>भर्खरका कागजातहरू</h2>
+
+  <form class="search-row" method="GET" action="/">
+    <input type="search" name="q" value="{{.Query}}" placeholder="खोज्नुहोस्…">
+    {{if .Category}}<input type="hidden" name="cat" value="{{.Category}}">{{end}}
+    <button type="submit">खोज्नुहोस्</button>
+  </form>
+
+  {{/* Category filter tabs */}}
+  <div class="category-tabs">
+    {{range .Categories}}
+    <a href="/?cat={{.}}" class="{{if eq . $.Category}}active{{end}}">{{.}}</a>
+    {{end}}
+  </div>
+
+  {{/* Document list
+       TODO: populated from DB query in indexHandler.
+       Each Document: ID, Title, TitleNP, Category, Description, CreatedAt, FilePath */}}
+  {{if .Documents}}
+  <ul class="doc-list">
+    {{range .Documents}}
+    <li class="doc-item">
+      <a class="doc-title" href="/document/{{.ID}}">{{.Title}}</a>
+      {{if .TitleNP}}<span style="font-family:'Hind',sans-serif;font-size:.9rem;color:#555">{{.TitleNP}}</span>{{end}}
+      <div class="doc-meta">
+        {{if .Category}}<span class="tag">{{.Category}}</span>{{end}}
+        {{if .Description}}<span>{{.Description}}</span>{{end}}
+        <span>{{.CreatedAt}}</span>
+        <a href="/document/{{.ID}}/edit" style="font-size:.78rem;color:#888;margin-left:auto">सम्पादन</a>
+      </div>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p style="color:#888;text-align:center">अहिलेसम्म कुनै कागजात छैन। <a href="/upload">योगदान गर्नुहोस् →</a></p>
+  {{end}}
+</section>
+{{end}}

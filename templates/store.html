@@ -1,0 +1,37 @@
+{{define "content"}}
+<div class="container">
+  <div class="store-hero">
+    <h1>Store — पसल</h1>
+    <p style="color:#6b6866;max-width:520px;margin:.5rem auto 0">
+      Books and materials published or curated by Yogilib.
+    </p>
+  </div>
+
+  {{/*
+    TODO: .StoreItems loaded from DB or static config.
+    Table: store_items — columns: id, title, title_np, description, price_npr, image_url, buy_url
+  */}}
+  {{if .StoreItems}}
+  <div class="store-grid">
+    {{range .StoreItems}}
+    <div class="store-item">
+      {{if .ImageURL}}<img src="{{.ImageURL}}" alt="{{.Title}}">{{end}}
+      <h3>{{.Title}}</h3>
+      {{if .TitleNP}}<p style="font-family:'Hind',sans-serif">{{.TitleNP}}</p>{{end}}
+      <p>{{.Description}}</p>
+      {{if .BuyURL}}
+      <a class="btn btn-primary" href="{{.BuyURL}}" target="_blank" rel="noopener"
+         style="display:inline-block;text-decoration:none;padding:6px 14px">
+        Buy →
+      </a>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+  {{else}}
+  <p style="text-align:center;color:#888;padding:3rem 0">
+    No items yet. Check back soon.
+  </p>
+  {{end}}
+</div>
+{{end}}

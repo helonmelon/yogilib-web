@@ -1,0 +1,56 @@
+{{define "content"}}
+<div class="container">
+  <h2>कागजात सम्पादन</h2>
+  <a class="back-link" href="/document/{{.Doc.ID}}">← कागजातमा फर्कनुहोस्</a>
+
+  {{if .Flash}}<div class="flash flash-ok">{{.Flash}}</div>{{end}}
+  {{if .Error}}<div class="flash flash-err">{{.Error}}</div>{{end}}
+
+  {{/*
+    TODO: wire up POST /document/{id}/edit to your backend.
+    Should update title, title_np, category, description in documents table.
+    Optionally allow replacing the file.
+    Redirect to /document/{id} on success.
+  */}}
+  <form class="form-card" method="POST" action="/document/{{.Doc.ID}}/edit" enctype="multipart/form-data">
+
+    <div class="form-group">
+      <label for="title">शीर्षक (अंग्रेजी)</label>
+      <input type="text" id="title" name="title" value="{{.Doc.Title}}" required>
+    </div>
+
+    <div class="form-group">
+      <label for="title_np">शीर्षक (नेपाली)</label>
+      <input type="text" id="title_np" name="title_np" value="{{.Doc.TitleNP}}">
+    </div>
+
+    <div class="form-group">
+      <label for="category">वर्ग</label>
+      <select id="category" name="category">
+        <option value="">— छान्नुहोस् —</option>
+        <option {{if eq .Doc.Category "किताब"}}selected{{end}}>किताब</option>
+        <option {{if eq .Doc.Category "कागजात"}}selected{{end}}>कागजात</option>
+        <option {{if eq .Doc.Category "रेकर्ड"}}selected{{end}}>रेकर्ड</option>
+        <option {{if eq .Doc.Category "पत्रिका"}}selected{{end}}>पत्रिका</option>
+        <option {{if eq .Doc.Category "अन्य"}}selected{{end}}>अन्य</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="description">विवरण</label>
+      <textarea id="description" name="description">{{.Doc.Description}}</textarea>
+    </div>
+
+    <div class="form-group">
+      <label>फाइल बदल्नुहोस् (ऐच्छिक)</label>
+      <input type="file" name="file">
+    </div>
+
+    <div style="display:flex;gap:.75rem;flex-wrap:wrap">
+      <button type="submit" class="btn btn-primary">परिवर्तन सुरक्षित गर्नुहोस्</button>
+      {{/* TODO: add a DELETE button wired to POST /document/{id}/delete */}}
+      <a href="/document/{{.Doc.ID}}" class="btn btn-forest" style="text-decoration:none;line-height:1.6">रद्द गर्नुहोस्</a>
+    </div>
+  </form>
+</div>
+{{end}}

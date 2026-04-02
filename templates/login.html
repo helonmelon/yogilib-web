@@ -1,0 +1,29 @@
+{{define "content"}}
+<div class="login-wrap">
+  <p style="text-align:center;font-size:2rem;color:#e3173d;margin:0">ॐ</p>
+  <h1>Yogilib</h1>
+  <p style="text-align:center;color:#6b6866;margin-top:-.5rem">व्यवस्थापक पहुँच</p>
+
+  {{if .Error}}<div class="flash flash-err">{{.Error}}</div>{{end}}
+
+  {{/*
+    TODO: POST /login
+    Handler should:
+      1. Validate email + password against users table (bcrypt)
+      2. Set a session cookie or JWT
+      3. Redirect to /dashboard on success
+      4. Re-render login with .Error on failure
+  */}}
+  <form class="form-card" method="POST" action="/login" style="margin-top:1.5rem">
+    <div class="form-group">
+      <label for="email">इमेल</label>
+      <input type="email" id="email" name="email" required autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label for="password">पासवर्ड</label>
+      <input type="password" id="password" name="password" required autocomplete="current-password">
+    </div>
+    <button type="submit" class="btn btn-primary" style="width:100%">प्रवेश गर्नुहोस्</button>
+  </form>
+</div>
+{{end}}

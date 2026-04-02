@@ -1,0 +1,66 @@
+{{define "content"}}
+<div class="container">
+
+  <div class="dashboard-header">
+    <div>
+      <h2>ड्यासबोर्ड</h2>
+      <p style="color:#6b6866;font-size:.88rem;margin:.25rem 0 0">
+        {{len .Documents}} कागजातहरू
+      </p>
+    </div>
+    <div style="display:flex;gap:.75rem;align-items:center">
+      {{/* Search */}}
+      <form method="GET" action="/dashboard">
+        <input type="search" name="q" value="{{.Query}}"
+               placeholder="खोज्नुहोस्…"
+               style="padding:5px 9px;border:1px solid #ccc;font-family:inherit;font-size:.9rem">
+        {{if .Category}}<input type="hidden" name="cat" value="{{.Category}}">{{end}}
+      </form>
+      <a href="/upload" class="btn btn-primary" style="text-decoration:none;padding:6px 14px;white-space:nowrap">
+        + अपलोड
+      </a>
+    </div>
+  </div>
+
+  {{/* Category tabs */}}
+  <div class="category-tabs" style="margin-bottom:1.25rem">
+    {{range .Categories}}
+    <a href="/dashboard?cat={{.}}" class="{{if eq . $.Category}}active{{end}}">{{.}}</a>
+    {{end}}
+  </div>
+
+  {{/*
+    TODO: .Documents comes from a DB query filtered by .Category and .Query.
+    Expected auth: middleware should verify session before serving this page.
+    Suggested middleware pattern shown in main.go comments.
+  */}}
+  {{if .Documents}}
+  <div class="doc-grid">
+    {{range .Documents}}
+    <div class="doc-card">
+      <a class="card-title" href="/document/{{.ID}}">{{.Title}}</a>
+      {{if .TitleNP}}
+      <span style="font-family:'Hind',sans-serif;font-size:.82rem;color:#555">{{.TitleNP}}</span>
+      {{end}}
+      <div class="card-meta">
+        {{if .Category}}<span class="tag">{{.Category}}</span>{{end}}
+        <span>{{.CreatedAt}}</span>
+      </div>
+      {{if .Description}}
+      <p style="font-size:.83rem;color:#555;margin:.25rem 0 0">{{.Description}}</p>
+      {{end}}
+      <div class="card-actions">
+        <a href="/document/{{.ID}}">हेर्नुहोस्</a>
+        <a href="/document/{{.ID}}/edit">सम्पादन</a>
+      </div>
+    </div>
+    {{end}}
+  </div>
+  {{else}}
+  <p style="color:#888;text-align:center;padding:3rem 0">
+    कुनै कागजात भेटिएन। <a href="/upload">अपलोड गर्नुहोस् →</a>
+  </p>
+  {{end}}
+
+</div>
+{{end}}

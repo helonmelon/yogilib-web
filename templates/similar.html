@@ -1,0 +1,21 @@
+{{define "content"}}
+<div class="reading">
+  <h3 style="text-align:center;font-family:'Hind',sans-serif">ॐ नम शिवाय।</h3>
+  <h1>Similar Sites — अरु सान्दर्भिक साइटहरु</h1>
+  <a class="back-link" href="/">← Home</a>
+
+  <p>There are other sites on the internet on similar missions as this. We are
+  grateful for their will and effort.</p>
+
+  {{/* TODO: .SimilarSites can be loaded from DB if you want them editable.
+       For now, static list. Table: similar_sites — columns: name, url, description */}}
+  <ul>
+    <li><a href="https://wisdomlib.org/" target="_blank" rel="noopener">Wisdom Library</a></li>
+    <li><a href="https://pahar.in/" target="_blank" rel="noopener">Mountains of Central Asia Digital Dataset</a></li>
+    <li><a href="https://onlinesanskritbooks.com" target="_blank" rel="noopener">Online Sanskrit Books</a></li>
+    <li><a href="https://sanskritdocuments.org/" target="_blank" rel="noopener">Sanskrit Documents</a></li>
+    <li><a href="https://libgen.is" target="_blank" rel="noopener">Library Genesis</a></li>
+    <li><a href="https://yogiyogendranath.blogspot.com/" target="_blank" rel="noopener">Yogi Yogendranath Blogspot</a></li>
+  </ul>
+</div>
+{{end}}

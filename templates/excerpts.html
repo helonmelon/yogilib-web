@@ -1,0 +1,21 @@
+{{define "content"}}
+<div class="reading">
+  <img class="page-img" src="/static/imgs/yogiji.jpeg" alt="Yogi Narharinath">
+  <h1>Excerpts — अंशहरू</h1>
+  <a class="back-link" href="/">← Home</a>
+
+  <h3>Transcribed documents:</h3>
+
+  {{/* TODO: .Excerpts comes from DB query in excerptsHandler.
+       Table: excerpts — columns: slug, title, body_html, created_at */}}
+  {{if .Excerpts}}
+  <ul>
+    {{range .Excerpts}}
+    <li><a href="/excerpts/{{.Slug}}">{{.Title}}</a></li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p style="color:#888">No excerpts yet. <a href="/upload">Contribute one →</a></p>
+  {{end}}
+</div>
+{{end}}

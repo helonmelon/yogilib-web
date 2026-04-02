@@ -1,0 +1,16 @@
+{{define "content"}}
+<div class="reading">
+  <h1>{{.Exc.Title}}</h1>
+  <a class="back-link" href="/excerpts">← All Excerpts</a>
+
+  {{/* TODO: .Exc.Body is template.HTML rendered from DB field `body_html`.
+       Store raw HTML or Markdown-converted HTML in the excerpts table. */}}
+  <div class="excerpt-body">
+    {{if .Exc.Body}}
+      {{.Exc.Body}}
+    {{else}}
+      <p style="color:#888"><em>Content not yet available.</em></p>
+    {{end}}
+  </div>
+</div>
+{{end}}
