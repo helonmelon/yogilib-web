@@ -1,144 +1,64 @@
 # Yogilib — Web Frontend
 
-A Go HTTP server serving the Yogilib digital archive. Pure stdlib (`net/http`,
-`html/template`). No Node, no Python, no external Go dependencies.
+A digital archive for the works of **Yogi Narharinath** (योगी नरहरिनाथ) — Nepali scholar, historian, and religious figure. The site lets visitors browse, search, and read historical documents in English, Nepali, and Sanskrit, and lets contributors upload new material.
 
-## Run
-
-```
-go run main.go           # development
-go build -o yogilib .   # production binary
-PORT=9000 ./yogilib      # custom port (default 8080)
-```
-
-Requires **Go 1.22+** (uses pattern matching in `http.NewServeMux`).
+Built as a **pure Go stdlib web server** — no Node, no Python, no external Go dependencies. Every page is server-rendered via `html/template`. The frontend is complete and running on mock data; the backend (database, auth, file storage) is ready to be wired in.
 
 ---
 
-## Project layout
+## Quick start
 
+```bash
+go run main.go           # dev server at http://localhost:8080
+go build -o yogilib .    # production binary
+PORT=9000 ./yogilib      # custom port
 ```
-yogilib-web/
-├── main.go              # routes, handlers, mock data
-├── go.mod
-├── templates/
-│   ├── base.html        # shared layout: header, nav, footer
-│   ├── index.html       # homepage — document list + search
-│   ├── about.html       # about Yogi Narharinath
-│   ├── works.html       # bibliography
-│   ├── excerpts.html    # list of transcribed excerpts
-│   ├── excerpt.html     # single excerpt viewer
-│   ├── mission.html     # about the site
-│   ├── similar.html     # similar sites
-│   ├── document.html    # document viewer (PDF embed / download)
-│   ├── edit.html        # edit a document's metadata
-│   ├── upload.html      # contribute a new document
-│   ├── store.html       # store / shop
-│   ├── login.html       # admin login
-│   └── dashboard.html   # admin document grid
-└── static/
-    ├── css/style.css
-    ├── fonts/           # Himalaya woff/woff2
-    └── imgs/            # yogi photos
-```
+
+Requires **Go 1.22+**.
 
 ---
 
-## Connecting the backend
+## What's in the box
 
-Every handler in `main.go` has `// TODO:` comments describing exactly what DB
-call to make. The pattern is:
+| Area | Status |
+|---|---|
+| All public pages (home, about, works, document viewer, excerpts, store, similar sites) | Done |
+| Contribute / upload form with rich text editor (Quill.js) | Done |
+| Admin pages (dashboard, edit, login) | Done — auth stub in place |
+| Preeti → Unicode converter (legacy Nepali encoding) | Done |
+| ITRANS → Devanagari converter (Sanskrit transliteration) | Done |
+| PostgreSQL schema | Designed — see `docs/04-backend-integration.md` |
+| Auth middleware | Stubbed — see `docs/04-backend-integration.md` |
+| File / object storage (R2, S3) | Not connected |
 
-1. Replace the `mock*()` helper calls with real queries.
-2. Add an auth middleware (stub in `main.go` comments) and wrap protected routes.
-3. Wire file upload to your object storage of choice.
-
-### Suggested database schema (Postgres)
-
-```sql
-CREATE TABLE documents (
-    id          SERIAL PRIMARY KEY,
-    title       TEXT NOT NULL,
-    title_np    TEXT,
-    category    TEXT,
-    description TEXT,
-    file_path   TEXT,         -- URL / path returned by object storage
-    user_id     INTEGER REFERENCES users(id),
-    created_at  TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE excerpts (
-    id         SERIAL PRIMARY KEY,
-    slug       TEXT UNIQUE NOT NULL,
-    title      TEXT NOT NULL,
-    body_html  TEXT,          -- render from Markdown or store raw HTML
-    created_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE users (
-    id            SERIAL PRIMARY KEY,
-    email         TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,  -- bcrypt
-    created_at    TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE store_items (
-    id          SERIAL PRIMARY KEY,
-    title       TEXT NOT NULL,
-    title_np    TEXT,
-    description TEXT,
-    image_url   TEXT,
-    buy_url     TEXT,
-    sort_order  INT DEFAULT 0,
-    active      BOOLEAN DEFAULT true
-);
-```
-
-### File storage
-
-`document.FilePath` should be a URL accessible by the browser. Point it to:
-- **Cloudflare R2 / S3** — store on upload, save public URL to DB
-- **Local** — serve under `/static/docs/` and store the relative path
-
-### Authentication
-
-The `requireAuth` middleware stub in `main.go` shows the pattern. Pick one:
-- **Signed cookies** — `net/http` + `crypto/hmac`
-- **gorilla/sessions** — battle-tested session store
-- **JWT** — stateless, easy to plug into a separate API later
-
-### Page-by-page TODO reference
-
-| Route | Handler | What to connect |
-|---|---|---|
-| `GET /` | `indexHandler` | `SELECT` documents with optional search/category filter |
-| `GET /excerpts` | `excerptsHandler` | `SELECT` all excerpts |
-| `GET /excerpts/{slug}` | `excerptHandler` | `SELECT` excerpt by slug |
-| `GET /document/{id}` | `documentHandler` | `SELECT` document by id |
-| `GET /document/{id}/edit` | `editGetHandler` | auth + prefill form |
-| `POST /document/{id}/edit` | `editPostHandler` | auth + `UPDATE` document |
-| `GET /upload` | `uploadGetHandler` | auth (optional for public contrib) |
-| `POST /upload` | `uploadPostHandler` | parse file, object storage, `INSERT` |
-| `GET /dashboard` | `dashboardHandler` | auth + `SELECT` with filters |
-| `POST /login` | `loginPostHandler` | bcrypt check + set session cookie |
-| `POST /logout` | `logoutHandler` | clear session |
+Every handler in `main.go` currently calls an in-memory `mock*()` function. Each one has a `// TODO:` comment with the exact DB query to replace it with.
 
 ---
 
-## Designing pages step by step
+## Stack at a glance
 
-Templates live in `templates/`. Each file has two parts:
+```
+Browser → net/http Mux → Handler → html/template → HTML
+```
 
-- `base.html` — the shared shell (header, nav, footer). Edit this to change
-  anything site-wide.
-- `{page}.html` — defines `{{define "content"}}…{{end}}`. Only contains the
-  unique body of that page.
+- **Server**: `net/http` + `html/template` (Go stdlib only)
+- **Styles**: single `static/css/style.css`, Himalaya font for Devanagari
+- **Editor**: Quill.js v1.3.7 (CDN, no build step)
+- **Language support**: Unicode Devanagari for Nepali and Sanskrit; Preeti and ITRANS converters for legacy text
+- **Planned DB**: PostgreSQL with full-text search across English and Nepali titles
+- **Planned storage**: Cloudflare R2 or S3-compatible for document files
 
-To add a new page:
+---
 
-1. Create `templates/mypage.html` with `{{define "content"}}…{{end}}`.
-2. Add a handler function in `main.go` that calls `render(w, "mypage", data)`.
-3. Register the route: `mux.HandleFunc("GET /mypage", myPageHandler)`.
+## Docs
 
-The `PageData` struct in `main.go` is the shared envelope. Add fields to it as
-your new pages need them.
+The `docs/` folder has everything a developer needs to go deeper:
+
+| File | What it covers |
+|---|---|
+| [`01-getting-started.md`](docs/01-getting-started.md) | Running the server, project layout, adding new pages |
+| [`02-architecture.md`](docs/02-architecture.md) | Request lifecycle, core types, routing table, template system |
+| [`03-design-system.md`](docs/03-design-system.md) | Typography, colour palette, UI components |
+| [`04-backend-integration.md`](docs/04-backend-integration.md) | DB schema, handler TODO map, file upload flow, auth, search |
+| [`05-language-support.md`](docs/05-language-support.md) | Unicode, Nepali typing, Preeti encoding, ITRANS, Sanskrit |
+| [`06-changelog.md`](docs/06-changelog.md) | Change history |
