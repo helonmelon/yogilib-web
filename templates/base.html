@@ -18,7 +18,9 @@
     <span>{{.User.Email}}</span>
     <a href="/dashboard">ड्यासबोर्ड</a>
     <a href="/upload">अपलोड</a>
-    <a href="/logout">बाहिर</a>
+    <form method="POST" action="/logout" style="display:inline;margin:0">
+      <button type="submit" style="background:none;border:none;color:#d4e4d2;text-decoration:underline;cursor:pointer;font-family:inherit;font-size:inherit;padding:0">बाहिर</button>
+    </form>
   </div>
   {{end}}
 

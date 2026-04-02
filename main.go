@@ -1,40 +1,43 @@
-// yogilib — Go HTTP server (stdlib only, no external deps)
-// Run:  go run main.go
+// yogilib — Go HTTP server
+// Run:   go run main.go
 // Build: go build -o yogilib .
-//
-// All route handlers are stubs with TODO comments marking exactly where to plug
-// in database queries, authentication, and file storage.
 package main
 
 import (
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
 )
 
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
-// A programmer connects these to the real database (Postgres, SQLite, etc.)
-// by replacing the mock slices below with actual queries.
 
 type Document struct {
 	ID          string
 	Title       string
-	TitleNP     string        // Nepali title
-	Category    string        // किताब | कागजात | रेकर्ड | पत्रिका | अन्य
+	TitleNP     string
+	Category    string
 	Description string
-	FilePath    string        // relative URL to the stored file
-	CreatedAt   string        // formatted date string for display
+	FilePath    string
+	CreatedAt   string
 }
 
 type Excerpt struct {
 	Slug  string
 	Title string
-	Body  template.HTML // stored as HTML in DB; mark safe before passing
+	Body  template.HTML
 }
 
 type StoreItem struct {
@@ -46,60 +49,243 @@ type StoreItem struct {
 	BuyURL      string
 }
 
-// User is set by an auth middleware once sessions are wired up.
 type User struct {
-	ID    string
+	ID    int
 	Email string
+	Role  string // "admin" | "uploader" | "viewer"
 }
 
-// PageData is the single data envelope passed to every template.
-// Only populate the fields relevant to each page.
 type PageData struct {
 	Title      string
-	Query      string        // search query string
-	Category   string        // active category filter
-	Categories []string      // list of category tabs
-	Flash      string        // success message
-	Error      string        // error message
+	Query      string
+	Category   string
+	Categories []string
+	Flash      string
+	Error      string
 	Documents  []Document
 	Doc        *Document
 	Excerpts   []Excerpt
 	Exc        *Excerpt
 	StoreItems []StoreItem
-	User       *User         // nil when not logged in
+	User       *User // nil when not logged in
 }
 
 // ---------------------------------------------------------------------------
-// Mock data
+// Role hierarchy
 // ---------------------------------------------------------------------------
-// TODO: replace every function below with a real DB query.
-// Suggested schema is in README.md.
+
+var roleLevel = map[string]int{
+	"viewer":   1,
+	"uploader": 2,
+	"admin":    3,
+}
+
+func hasRole(userRole, required string) bool {
+	return roleLevel[userRole] >= roleLevel[required]
+}
+
+// ---------------------------------------------------------------------------
+// Database
+// ---------------------------------------------------------------------------
+
+var db *sql.DB
 
 var docCategories = []string{"सबै", "किताब", "कागजात", "रेकर्ड", "पत्रिका", "अंश", "अन्य"}
 
-func mockDocuments() []Document {
-	// TODO: SELECT * FROM documents ORDER BY created_at DESC LIMIT 50
-	return []Document{
-		{
-			ID: "1", Title: "Treaty of Sugowlee",
-			TitleNP:     "सुगौली सन्धि",
-			Category:    "कागजात",
-			Description: "Signed December 2, 1815 between East India Company and the Kingdom of Nepal.",
-			FilePath:    "", // TODO: object-storage URL
-			CreatedAt:   time.Now().AddDate(0, 0, -3).Format("2 Jan 2006"),
-		},
+func initDB(path string) error {
+	var err error
+	db, err = sql.Open("sqlite", path)
+	if err != nil {
+		return err
 	}
+	db.SetMaxOpenConns(1) // SQLite: single writer
+
+	schema := `
+	PRAGMA journal_mode=WAL;
+	PRAGMA foreign_keys=ON;
+
+	CREATE TABLE IF NOT EXISTS documents (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		title       TEXT NOT NULL,
+		title_np    TEXT,
+		category    TEXT,
+		description TEXT,
+		file_path   TEXT,
+		created_at  TEXT NOT NULL
+	);
+
+	CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+		title, title_np, description,
+		content='documents', content_rowid='id',
+		tokenize='unicode61'
+	);
+
+	CREATE TRIGGER IF NOT EXISTS docs_ai AFTER INSERT ON documents BEGIN
+		INSERT INTO documents_fts(rowid, title, title_np, description)
+		VALUES (new.id, new.title, COALESCE(new.title_np,''), COALESCE(new.description,''));
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS docs_ad AFTER DELETE ON documents BEGIN
+		INSERT INTO documents_fts(documents_fts, rowid, title, title_np, description)
+		VALUES ('delete', old.id, old.title, COALESCE(old.title_np,''), COALESCE(old.description,''));
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS docs_au AFTER UPDATE ON documents BEGIN
+		INSERT INTO documents_fts(documents_fts, rowid, title, title_np, description)
+		VALUES ('delete', old.id, old.title, COALESCE(old.title_np,''), COALESCE(old.description,''));
+		INSERT INTO documents_fts(rowid, title, title_np, description)
+		VALUES (new.id, new.title, COALESCE(new.title_np,''), COALESCE(new.description,''));
+	END;
+
+	CREATE TABLE IF NOT EXISTS users (
+		id            INTEGER PRIMARY KEY AUTOINCREMENT,
+		email         TEXT UNIQUE NOT NULL,
+		password_hash TEXT NOT NULL,
+		role          TEXT NOT NULL DEFAULT 'viewer'
+	);
+
+	CREATE TABLE IF NOT EXISTS sessions (
+		token      TEXT PRIMARY KEY,
+		user_id    INTEGER NOT NULL REFERENCES users(id),
+		expires_at TEXT NOT NULL
+	);
+	`
+
+	if _, err := db.Exec(schema); err != nil {
+		return fmt.Errorf("schema: %w", err)
+	}
+
+	return seedData()
 }
 
-func mockExcerpts() []Excerpt {
-	// TODO: SELECT slug, title FROM excerpts ORDER BY created_at DESC
+func seedData() error {
+	var count int
+
+	// Seed documents
+	db.QueryRow("SELECT COUNT(*) FROM documents").Scan(&count)
+	if count == 0 {
+		_, err := db.Exec(`
+			INSERT INTO documents (title, title_np, category, description, created_at) VALUES
+			('Treaty of Sugowlee', 'सुगौली सन्धि', 'कागजात',
+			 'Signed December 2, 1815 between East India Company and the Kingdom of Nepal.',
+			 ?)
+		`, time.Now().AddDate(0, 0, -3).Format("2 Jan 2006"))
+		if err != nil {
+			return err
+		}
+	}
+
+	// Seed users
+	db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if count == 0 {
+		seed := []struct{ email, password, role string }{
+			{"admin@yogilib.org", "admin123", "admin"},
+			{"upload@yogilib.org", "upload123", "uploader"},
+		}
+		for _, u := range seed {
+			hash, err := bcrypt.GenerateFromPassword([]byte(u.password), bcrypt.DefaultCost)
+			if err != nil {
+				return err
+			}
+			if _, err := db.Exec(
+				`INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)`,
+				u.email, string(hash), u.role,
+			); err != nil {
+				return err
+			}
+		}
+		log.Println("seed users: admin@yogilib.org/admin123  upload@yogilib.org/upload123")
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// DB query functions
+// ---------------------------------------------------------------------------
+
+func queryDocuments(q, cat string) []Document {
+	var rows *sql.Rows
+	var err error
+
+	catFilter := cat != "" && cat != "सबै"
+
+	if q != "" {
+		ftsQuery := strings.TrimSpace(q) + "*" // prefix match
+		if catFilter {
+			rows, err = db.Query(`
+				SELECT d.id, d.title, COALESCE(d.title_np,''), d.category,
+				       COALESCE(d.description,''), COALESCE(d.file_path,''), d.created_at
+				FROM documents d
+				WHERE d.id IN (SELECT rowid FROM documents_fts WHERE documents_fts MATCH ?)
+				  AND d.category = ?
+				ORDER BY d.created_at DESC
+			`, ftsQuery, cat)
+		} else {
+			rows, err = db.Query(`
+				SELECT d.id, d.title, COALESCE(d.title_np,''), d.category,
+				       COALESCE(d.description,''), COALESCE(d.file_path,''), d.created_at
+				FROM documents d
+				WHERE d.id IN (SELECT rowid FROM documents_fts WHERE documents_fts MATCH ?)
+				ORDER BY d.created_at DESC
+			`, ftsQuery)
+		}
+	} else if catFilter {
+		rows, err = db.Query(`
+			SELECT id, title, COALESCE(title_np,''), category,
+			       COALESCE(description,''), COALESCE(file_path,''), created_at
+			FROM documents WHERE category = ?
+			ORDER BY created_at DESC
+		`, cat)
+	} else {
+		rows, err = db.Query(`
+			SELECT id, title, COALESCE(title_np,''), category,
+			       COALESCE(description,''), COALESCE(file_path,''), created_at
+			FROM documents ORDER BY created_at DESC
+		`)
+	}
+
+	if err != nil {
+		log.Println("queryDocuments:", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var docs []Document
+	for rows.Next() {
+		var d Document
+		var id int
+		if err := rows.Scan(&id, &d.Title, &d.TitleNP, &d.Category, &d.Description, &d.FilePath, &d.CreatedAt); err != nil {
+			log.Println("scan:", err)
+			continue
+		}
+		d.ID = strconv.Itoa(id)
+		docs = append(docs, d)
+	}
+	return docs
+}
+
+func getDocumentByID(id string) *Document {
+	var d Document
+	var idInt int
+	err := db.QueryRow(`
+		SELECT id, title, COALESCE(title_np,''), category,
+		       COALESCE(description,''), COALESCE(file_path,''), created_at
+		FROM documents WHERE id = ?
+	`, id).Scan(&idInt, &d.Title, &d.TitleNP, &d.Category, &d.Description, &d.FilePath, &d.CreatedAt)
+	if err != nil {
+		return nil
+	}
+	d.ID = strconv.Itoa(idInt)
+	return &d
+}
+
+func getExcerpts() []Excerpt {
 	return []Excerpt{
 		{Slug: "sugowlee", Title: "Treaty of Sugowlee, Dec. 2, 1815"},
 	}
 }
 
-func mockExcerptBySlug(slug string) *Excerpt {
-	// TODO: SELECT * FROM excerpts WHERE slug = $1
+func getExcerptBySlug(slug string) *Excerpt {
 	bodies := map[string]template.HTML{
 		"sugowlee": `<p>Articles of Treaty concluded between the Honourable East India Company
 		and the Rajah of Nepaul, signed by Lieutenant-Colonel Paris Bradshaw,
@@ -111,31 +297,102 @@ func mockExcerptBySlug(slug string) *Excerpt {
 	if !ok {
 		return nil
 	}
-	title := slug
-	for _, e := range mockExcerpts() {
-		if e.Slug == slug {
-			title = e.Title
-			break
-		}
-	}
-	return &Excerpt{Slug: slug, Title: title, Body: b}
+	return &Excerpt{Slug: slug, Title: "Treaty of Sugowlee, Dec. 2, 1815", Body: b}
 }
 
-func mockDocumentByID(id string) *Document {
-	// TODO: SELECT * FROM documents WHERE id = $1
-	for _, d := range mockDocuments() {
-		if d.ID == id {
-			return &d
-		}
+// ---------------------------------------------------------------------------
+// Session management
+// ---------------------------------------------------------------------------
+
+func newToken() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func createSession(userID int) (string, error) {
+	token := newToken()
+	expires := time.Now().Add(30 * 24 * time.Hour).Format(time.RFC3339)
+	_, err := db.Exec(`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`,
+		token, userID, expires)
+	return token, err
+}
+
+func deleteSession(token string) {
+	db.Exec(`DELETE FROM sessions WHERE token = ?`, token)
+}
+
+func sessionUser(r *http.Request) *User {
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		return nil
 	}
-	return nil
+	var u User
+	var expiresAt string
+	err = db.QueryRow(`
+		SELECT u.id, u.email, u.role, s.expires_at
+		FROM sessions s JOIN users u ON u.id = s.user_id
+		WHERE s.token = ?
+	`, cookie.Value).Scan(&u.ID, &u.Email, &u.Role, &expiresAt)
+	if err != nil {
+		return nil
+	}
+	exp, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil || time.Now().After(exp) {
+		deleteSession(cookie.Value)
+		return nil
+	}
+	return &u
+}
+
+func setSessionCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   30 * 24 * 60 * 60,
+	})
+}
+
+func clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Auth middleware
+// ---------------------------------------------------------------------------
+
+func requireRole(role string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u := sessionUser(r)
+		if u == nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		if !hasRole(u.Role, role) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
 }
 
 // ---------------------------------------------------------------------------
 // Template rendering
 // ---------------------------------------------------------------------------
 
-func render(w http.ResponseWriter, page string, data PageData) {
+func render(w http.ResponseWriter, r *http.Request, page string, data PageData) {
+	if data.User == nil {
+		data.User = sessionUser(r)
+	}
 	t, err := template.ParseFiles(
 		"templates/base.html",
 		"templates/"+page+".html",
@@ -156,186 +413,186 @@ func render(w http.ResponseWriter, page string, data PageData) {
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	cat := r.URL.Query().Get("cat")
-
-	// TODO: pass q and cat to DB query instead of filtering in memory
-	docs := mockDocuments()
-	var filtered []Document
-	for _, d := range docs {
-		if cat != "" && cat != "सबै" && d.Category != cat {
-			continue
-		}
-		if q != "" && !strings.Contains(strings.ToLower(d.Title), strings.ToLower(q)) &&
-			!strings.Contains(d.TitleNP, q) {
-			continue
-		}
-		filtered = append(filtered, d)
-	}
-
-	render(w, "index", PageData{
+	render(w, r, "index", PageData{
 		Title:      "Home",
 		Query:      q,
 		Category:   cat,
 		Categories: docCategories,
-		Documents:  filtered,
+		Documents:  queryDocuments(q, cat),
 	})
 }
 
 func aboutHandler(w http.ResponseWriter, r *http.Request) {
-	render(w, "about", PageData{Title: "About Yogi Narharinath — योगीबारे"})
+	render(w, r, "about", PageData{Title: "About Yogi Narharinath — योगीबारे"})
 }
 
 func worksHandler(w http.ResponseWriter, r *http.Request) {
-	render(w, "works", PageData{Title: "Works — ग्रन्थावली"})
+	render(w, r, "works", PageData{Title: "Works — ग्रन्थावली"})
 }
 
 func excerptsHandler(w http.ResponseWriter, r *http.Request) {
-	render(w, "excerpts", PageData{
+	render(w, r, "excerpts", PageData{
 		Title:    "Excerpts — अंशहरू",
-		Excerpts: mockExcerpts(),
+		Excerpts: getExcerpts(),
 	})
 }
 
 func excerptHandler(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
-	exc := mockExcerptBySlug(slug)
+	exc := getExcerptBySlug(slug)
 	if exc == nil {
 		http.NotFound(w, r)
 		return
 	}
-	render(w, "excerpt", PageData{Title: exc.Title, Exc: exc})
+	render(w, r, "excerpt", PageData{Title: exc.Title, Exc: exc})
 }
 
 func documentHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	doc := mockDocumentByID(id)
+	doc := getDocumentByID(id)
 	if doc == nil {
 		http.NotFound(w, r)
 		return
 	}
-	render(w, "document", PageData{Title: doc.Title, Doc: doc})
+	render(w, r, "document", PageData{Title: doc.Title, Doc: doc})
 }
 
 func editGetHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	doc := mockDocumentByID(id)
+	doc := getDocumentByID(id)
 	if doc == nil {
 		http.NotFound(w, r)
 		return
 	}
-	// TODO: require auth — redirect to /login if no session
-	render(w, "edit", PageData{Title: "Edit: " + doc.Title, Doc: doc})
+	render(w, r, "edit", PageData{Title: "Edit: " + doc.Title, Doc: doc})
 }
 
 func editPostHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	// TODO:
-	//   1. Require auth
-	//   2. Parse multipart form
-	//   3. Validate fields
-	//   4. UPDATE documents SET title=$1, title_np=$2, category=$3, description=$4 WHERE id=$5
-	//   5. If new file: replace in object storage, update file_path
-	//   6. Redirect to /document/{id}
-	_ = id
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	_, err := db.Exec(`
+		UPDATE documents SET title=?, title_np=?, category=?, description=? WHERE id=?
+	`, r.FormValue("title"), r.FormValue("title_np"), r.FormValue("category"), r.FormValue("description"), id)
+	if err != nil {
+		log.Println("editPost:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
 	http.Redirect(w, r, "/document/"+id, http.StatusSeeOther)
 }
 
 func uploadGetHandler(w http.ResponseWriter, r *http.Request) {
-	render(w, "upload", PageData{Title: "Contribute — योगदान"})
+	render(w, r, "upload", PageData{Title: "Contribute — योगदान"})
 }
 
 func uploadPostHandler(w http.ResponseWriter, r *http.Request) {
-	// TODO:
-	//   1. Parse multipart form (r.ParseMultipartForm)
-	//   2. Validate fields and file
-	//   3. Upload file to object storage → get URL
-	//   4. INSERT INTO documents (title, title_np, category, description, file_path, created_at)
-	//   5. Redirect to /document/{new_id}
-	render(w, "upload", PageData{
-		Title: "Contribute — योगदान",
-		Flash: "Upload received. (Backend not yet connected — this is a placeholder.)",
-	})
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	title := r.FormValue("title")
+	if title == "" {
+		render(w, r, "upload", PageData{Title: "Contribute — योगदान", Error: "Title is required."})
+		return
+	}
+	result, err := db.Exec(`
+		INSERT INTO documents (title, title_np, category, description, file_path, created_at)
+		VALUES (?, ?, ?, ?, '', ?)
+	`, title, r.FormValue("title_np"), r.FormValue("category"), r.FormValue("description"),
+		time.Now().Format("2 Jan 2006"))
+	if err != nil {
+		log.Println("uploadPost:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	id, _ := result.LastInsertId()
+	http.Redirect(w, r, "/document/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }
 
 func missionHandler(w http.ResponseWriter, r *http.Request) {
-	render(w, "mission", PageData{Title: "Mission — उद्देश्य"})
+	render(w, r, "mission", PageData{Title: "Mission — उद्देश्य"})
 }
 
 func similarHandler(w http.ResponseWriter, r *http.Request) {
-	render(w, "similar", PageData{Title: "Similar Sites — अरु साइट"})
+	render(w, r, "similar", PageData{Title: "Similar Sites — अरु साइट"})
 }
 
 func storeHandler(w http.ResponseWriter, r *http.Request) {
-	// TODO: SELECT * FROM store_items WHERE active = true ORDER BY sort_order
-	render(w, "store", PageData{Title: "Store — पसल"})
+	render(w, r, "store", PageData{Title: "Store — पसल"})
 }
 
 func loginGetHandler(w http.ResponseWriter, r *http.Request) {
-	render(w, "login", PageData{Title: "Login"})
+	if sessionUser(r) != nil {
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+		return
+	}
+	render(w, r, "login", PageData{Title: "Login"})
 }
 
 func loginPostHandler(w http.ResponseWriter, r *http.Request) {
-	// TODO:
-	//   1. r.ParseForm()
-	//   2. Fetch user by email: SELECT id, password_hash FROM users WHERE email = $1
-	//   3. bcrypt.CompareHashAndPassword(hash, []byte(password))
-	//   4. On success: create session (e.g. gorilla/sessions or a signed cookie)
-	//   5. http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
-	//   6. On failure: re-render login with .Error
-	render(w, "login", PageData{
-		Title: "Login",
-		Error: "Login not yet connected to a backend.",
-	})
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	email := strings.TrimSpace(r.FormValue("email"))
+	password := r.FormValue("password")
+
+	var u User
+	var hash string
+	err := db.QueryRow(
+		`SELECT id, email, password_hash, role FROM users WHERE email = ?`, email,
+	).Scan(&u.ID, &u.Email, &hash, &u.Role)
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+		render(w, r, "login", PageData{Title: "Login", Error: "Invalid email or password."})
+		return
+	}
+
+	token, err := createSession(u.ID)
+	if err != nil {
+		http.Error(w, "Session error", http.StatusInternalServerError)
+		return
+	}
+	setSessionCookie(w, token)
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
-	// TODO: invalidate session cookie
+	if cookie, err := r.Cookie("session"); err == nil {
+		deleteSession(cookie.Value)
+	}
+	clearSessionCookie(w)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func dashboardHandler(w http.ResponseWriter, r *http.Request) {
-	// TODO: auth middleware — check session, redirect to /login if absent
 	q := r.URL.Query().Get("q")
 	cat := r.URL.Query().Get("cat")
-
-	docs := mockDocuments() // TODO: DB query with q + cat filters
-	render(w, "dashboard", PageData{
+	render(w, r, "dashboard", PageData{
 		Title:      "Dashboard",
 		Query:      q,
 		Category:   cat,
 		Categories: docCategories,
-		Documents:  docs,
+		Documents:  queryDocuments(q, cat),
 	})
 }
-
-// ---------------------------------------------------------------------------
-// Auth middleware stub
-// ---------------------------------------------------------------------------
-// Wire this up once sessions are implemented.
-// Example:
-//
-//	func requireAuth(next http.HandlerFunc) http.HandlerFunc {
-//	    return func(w http.ResponseWriter, r *http.Request) {
-//	        user := sessionUser(r) // read from signed cookie or JWT
-//	        if user == nil {
-//	            http.Redirect(w, r, "/login", http.StatusSeeOther)
-//	            return
-//	        }
-//	        // Optionally inject user into context:
-//	        // ctx := context.WithValue(r.Context(), ctxUserKey, user)
-//	        // next(w, r.WithContext(ctx))
-//	        next(w, r)
-//	    }
-//	}
-//
-// Then protect routes:
-//   mux.HandleFunc("GET /dashboard", requireAuth(dashboardHandler))
-//   mux.HandleFunc("GET /upload",    requireAuth(uploadGetHandler))
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 func main() {
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "yogilib.db"
+	}
+	if err := initDB(dbPath); err != nil {
+		log.Fatal("db:", err)
+	}
+	defer db.Close()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -343,24 +600,30 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Static files (CSS, fonts, images)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
-	// Public pages
+	// Public — no login needed
 	mux.HandleFunc("GET /{$}", indexHandler)
 	mux.HandleFunc("GET /about", aboutHandler)
 	mux.HandleFunc("GET /works", worksHandler)
+	mux.HandleFunc("GET /excerpts", excerptsHandler)
+	mux.HandleFunc("GET /excerpts/{slug}", excerptHandler)
 	mux.HandleFunc("GET /document/{id}", documentHandler)
-	mux.HandleFunc("GET /document/{id}/edit", editGetHandler)
-	mux.HandleFunc("POST /document/{id}/edit", editPostHandler)
+	mux.HandleFunc("GET /mission", missionHandler)
+	mux.HandleFunc("GET /similar", similarHandler)
+	mux.HandleFunc("GET /store", storeHandler)
 	mux.HandleFunc("GET /login", loginGetHandler)
 	mux.HandleFunc("POST /login", loginPostHandler)
 	mux.HandleFunc("POST /logout", logoutHandler)
 
-	// Protected pages (add requireAuth wrapper once auth is implemented)
-	mux.HandleFunc("GET /upload", uploadGetHandler)
-	mux.HandleFunc("POST /upload", uploadPostHandler)
-	mux.HandleFunc("GET /dashboard", dashboardHandler)
+	// Uploader+ only
+	mux.HandleFunc("GET /upload", requireRole("uploader", uploadGetHandler))
+	mux.HandleFunc("POST /upload", requireRole("uploader", uploadPostHandler))
+
+	// Admin only
+	mux.HandleFunc("GET /dashboard", requireRole("admin", dashboardHandler))
+	mux.HandleFunc("GET /document/{id}/edit", requireRole("admin", editGetHandler))
+	mux.HandleFunc("POST /document/{id}/edit", requireRole("admin", editPostHandler))
 
 	log.Printf("yogilib → http://localhost:%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, mux))
