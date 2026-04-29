@@ -97,6 +97,7 @@ type PageData struct {
 	Diff            []DiffLine
 	WantedLinks     []WantedEntry
 	Summary         string
+	SummaryNP       string
 	Entities        []entityEntry
 	LinkSuggestions []linkSuggEntry
 }
@@ -282,6 +283,16 @@ func runMigrations() error {
 			return err
 		}
 		log.Println("migration3: applied")
+	}
+
+	if version < 4 {
+		if err := migration4(); err != nil {
+			return fmt.Errorf("migration4: %w", err)
+		}
+		if _, err := db.Exec("PRAGMA user_version = 4"); err != nil {
+			return err
+		}
+		log.Println("migration4: applied")
 	}
 
 	return nil
@@ -856,6 +867,7 @@ func documentHandler(w http.ResponseWriter, r *http.Request) {
 		Backlinks:       getBacklinks(id),
 		TOC:             toc,
 		Summary:         getDocSummary(id),
+		SummaryNP:       getDocSummaryNP(id),
 		Entities:        getDocEntities(id),
 		LinkSuggestions: getLinkSuggestionsForDoc(id),
 	})

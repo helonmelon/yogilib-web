@@ -51,13 +51,22 @@
     <!-- Short description -->
     {{if .Doc.Description}}<p style="margin-top:.75rem">{{.Doc.Description}}</p>{{end}}
 
-    <!-- AI summary (local model). Auto-generated; admin can ignore. -->
-    {{if .Summary}}
-    <aside class="ai-summary" style="margin-top:1rem;padding:.85rem 1.1rem;background:#f4f1e8;border-left:3px solid #8a7140;font-size:.95rem;line-height:1.55">
-      <div style="font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:#8a7140;margin-bottom:.3rem">
-        TL;DR <span style="color:#aaa;text-transform:none;letter-spacing:0">— generated locally by llama3.1:8b</span>
+    <!-- AI summary (local model). Bilingual lead block. -->
+    {{if or .Summary .SummaryNP}}
+    <aside class="ai-summary" style="margin-top:1rem;padding:.85rem 1.1rem;background:#f4f1e8;border-left:3px solid #8a7140;font-size:.95rem;line-height:1.6">
+      {{if .SummaryNP}}
+      <div class="ai-summary-np" style="font-family:'Hind',sans-serif;font-size:1.02rem;color:#3a3320;margin-bottom:.55rem;font-style:italic">
+        {{.SummaryNP}}
       </div>
-      {{.Summary}}
+      {{end}}
+      {{if .Summary}}
+      <div class="ai-summary-en" style="font-family:'Labrada',Georgia,serif">
+        {{.Summary}}
+      </div>
+      {{end}}
+      <div style="font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:#aaa;margin-top:.5rem">
+        TL;DR — generated locally by llama3.1:8b
+      </div>
     </aside>
     {{end}}
   </div>

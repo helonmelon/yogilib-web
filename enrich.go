@@ -68,10 +68,15 @@ func migration3() error {
 			body_hash  TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		// summary       = primary TL;DR in the body's main language
+		// summary_np    = short Devanagari Nepali précis (1-2 sentences)
+		//                 always present so the article header reads bilingually,
+		//                 even when the body language is English.
 		`CREATE TABLE IF NOT EXISTS summaries (
 			doc_id     INTEGER PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
 			model      TEXT NOT NULL,
 			summary    TEXT NOT NULL,
+			summary_np TEXT,
 			body_hash  TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
@@ -102,6 +107,17 @@ func migration3() error {
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
 			return fmt.Errorf("migration3: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration4: add summary_np column to summaries table (idempotent).
+// Existing migration3 deployments don't have it.
+func migration4() error {
+	if _, err := db.Exec("ALTER TABLE summaries ADD COLUMN summary_np TEXT"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migration4: %w", err)
 		}
 	}
 	return nil
@@ -319,15 +335,44 @@ func enrichSummary(ctx context.Context, d docToEnrich) (changed bool, err error)
 	if len(body) > maxEnrichBodyChars {
 		body = body[:maxEnrichBodyChars]
 	}
-	prompt := fmt.Sprintf(
-		`You are summarizing an article from a wiki about the writings of Yogi Naraharinath, `+
-			`a Nepalese sage and historian. Write a concise 1-paragraph TL;DR (4-6 sentences) `+
-			`that captures the key facts a reader would want to know first. `+
-			`Match the source language: if the article is in Nepali, write the summary in Nepali; `+
-			`if in English, write in English. Output ONLY the summary, no preamble or labels.`+
-			"\n\n---\nTitle: %s\n\nArticle:\n%s\n---\n\nSummary:",
-		d.title, body)
-	out, err := ollamaGenerate(ctx, genModel, prompt, false)
+
+	// Detect dominant script of the BODY (not title — the title is often
+	// already bilingual and tricks the model). If most letters are
+	// Devanagari, the article's main language is Nepali; otherwise English.
+	primaryIsNepali := dominantScript(body) == "devanagari"
+
+	var prompt string
+	if primaryIsNepali {
+		prompt = fmt.Sprintf(
+			"You are writing a wiki article lead for yogilib, an encyclopaedia "+
+				"of the writings of Yogi Naraharinath. The article is in Nepali (Devanagari script).\n\n"+
+				"Return STRICT JSON only, no prose, no markdown:\n"+
+				`{"summary":"<4-6 sentences in Nepali Devanagari, encyclopaedic tone>",`+
+				`"summary_np":"<1-2 sentence Nepali précis (Devanagari)>"}`+"\n\n"+
+				"Rules: NEVER use romanised Nepali. NEVER mix scripts. Be factual and tight. "+
+				"If a name or term appears only in English in the source, you may keep it in English "+
+				"inside parentheses on first mention.\n\n"+
+				"---\nTitle: %s\n\nArticle:\n%s\n---",
+			d.title, body)
+	} else {
+		prompt = fmt.Sprintf(
+			"You are writing a wiki article lead for yogilib, an encyclopaedia "+
+				"of the writings of Yogi Naraharinath. The article is in English.\n\n"+
+				"Return STRICT JSON only, no prose, no markdown:\n"+
+				`{"summary":"<4-6 sentence encyclopaedic English TL;DR>",`+
+				`"summary_np":"<1-2 sentence Devanagari Nepali précis of the same content>"}`+"\n\n"+
+				"Rules:\n"+
+				"- The Nepali précis MUST be in Devanagari script. NEVER use romanised Nepali "+
+				"(do not write \"ma\", \"ko\", \"gareko\" — use मा, को, गरेको).\n"+
+				"- Transliterate proper nouns into Devanagari naturally "+
+				"(e.g. Treaty of Sugauli → सुगौलीको सन्धि, East India Company → ईस्ट इण्डिया कम्पनी).\n"+
+				"- Be factual. No padding, no 'this article describes'.\n"+
+				"- If you don't know the Nepali for a term, keep the English term in Devanagari quotes.\n\n"+
+				"---\nTitle: %s\n\nArticle:\n%s\n---",
+			d.title, body)
+	}
+
+	out, err := ollamaGenerate(ctx, genModel, prompt, true) // JSON mode
 	if err != nil {
 		return false, fmt.Errorf("summary gen: %w", err)
 	}
@@ -335,17 +380,60 @@ func enrichSummary(ctx context.Context, d docToEnrich) (changed bool, err error)
 	if out == "" {
 		return false, nil
 	}
+
+	var parsed struct {
+		Summary   string `json:"summary"`
+		SummaryNP string `json:"summary_np"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &parsed); jerr != nil {
+		// brace-recovery (llama sometimes wraps JSON in prose)
+		if s := strings.Index(out, "{"); s >= 0 {
+			if e := strings.LastIndex(out, "}"); e > s {
+				if jerr2 := json.Unmarshal([]byte(out[s:e+1]), &parsed); jerr2 != nil {
+					return false, fmt.Errorf("summary parse: %w (raw: %.200s)", jerr, out)
+				}
+			}
+		} else {
+			return false, fmt.Errorf("summary parse: %w (raw: %.200s)", jerr, out)
+		}
+	}
+	parsed.Summary = strings.TrimSpace(parsed.Summary)
+	parsed.SummaryNP = strings.TrimSpace(parsed.SummaryNP)
+	if parsed.Summary == "" {
+		return false, nil
+	}
+
 	_, err = db.Exec(`
-		INSERT INTO summaries (doc_id, model, summary, body_hash, created_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO summaries (doc_id, model, summary, summary_np, body_hash, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(doc_id) DO UPDATE SET
 			model=excluded.model, summary=excluded.summary,
+			summary_np=excluded.summary_np,
 			body_hash=excluded.body_hash, created_at=excluded.created_at
-	`, d.id, genModel, out, d.hash, time.Now().UTC().Format(time.RFC3339))
+	`, d.id, genModel, parsed.Summary, parsed.SummaryNP, d.hash,
+		time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return false, fmt.Errorf("save summary: %w", err)
 	}
 	return true, nil
+}
+
+// dominantScript returns "devanagari" if Devanagari letters dominate,
+// else "latin". Counts letters only; ignores punctuation/digits.
+func dominantScript(s string) string {
+	var dev, lat int
+	for _, r := range s {
+		switch {
+		case r >= 0x0900 && r <= 0x097F:
+			dev++
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+			lat++
+		}
+	}
+	if dev > lat {
+		return "devanagari"
+	}
+	return "latin"
 }
 
 // extractedEntity is what the LLM returns in JSON mode.
@@ -658,6 +746,13 @@ func getDocSummary(docID string) string {
 	row := db.QueryRow(`SELECT summary FROM summaries WHERE doc_id=?`, docID)
 	_ = row.Scan(&s)
 	return s
+}
+
+func getDocSummaryNP(docID string) string {
+	var s sql.NullString
+	row := db.QueryRow(`SELECT summary_np FROM summaries WHERE doc_id=?`, docID)
+	_ = row.Scan(&s)
+	return s.String
 }
 
 type entityEntry struct {
