@@ -6,16 +6,11 @@
   {{if .Flash}}<div class="flash flash-ok">{{.Flash}}</div>{{end}}
   {{if .Error}}<div class="flash flash-err">{{.Error}}</div>{{end}}
 
-  {{/*
-    TODO: wire up POST /document/{id}/edit to your backend.
-    Should update title, title_np, category, description in documents table.
-    Optionally allow replacing the file.
-    Redirect to /document/{id} on success.
-  */}}
-  <form class="form-card" method="POST" action="/document/{{.Doc.ID}}/edit" enctype="multipart/form-data">
+  <form class="form-card" method="POST" action="/document/{{.Doc.ID}}/edit">
 
+    <!-- Titles -->
     <div class="form-group">
-      <label for="title">शीर्षक (अंग्रेजी)</label>
+      <label for="title">शीर्षक (English)</label>
       <input type="text" id="title" name="title" value="{{.Doc.Title}}" required>
     </div>
 
@@ -24,31 +19,107 @@
       <input type="text" id="title_np" name="title_np" value="{{.Doc.TitleNP}}">
     </div>
 
+    <!-- Category -->
     <div class="form-group">
-      <label for="category">वर्ग</label>
+      <label for="category">वर्ग / Category</label>
       <select id="category" name="category">
         <option value="">— छान्नुहोस् —</option>
-        <option {{if eq .Doc.Category "किताब"}}selected{{end}}>किताब</option>
-        <option {{if eq .Doc.Category "कागजात"}}selected{{end}}>कागजात</option>
-        <option {{if eq .Doc.Category "रेकर्ड"}}selected{{end}}>रेकर्ड</option>
-        <option {{if eq .Doc.Category "पत्रिका"}}selected{{end}}>पत्रिका</option>
-        <option {{if eq .Doc.Category "अन्य"}}selected{{end}}>अन्य</option>
+        <option value="किताब"   {{if eq .Doc.Category "किताब"}}selected{{end}}>किताब (Book)</option>
+        <option value="कागजात" {{if eq .Doc.Category "कागजात"}}selected{{end}}>कागजात (Document)</option>
+        <option value="रेकर्ड"  {{if eq .Doc.Category "रेकर्ड"}}selected{{end}}>रेकर्ड (Record)</option>
+        <option value="पत्रिका" {{if eq .Doc.Category "पत्रिका"}}selected{{end}}>पत्रिका (Journal)</option>
+        <option value="अंश"    {{if eq .Doc.Category "अंश"}}selected{{end}}>अंश (Excerpt)</option>
+        <option value="अन्य"   {{if eq .Doc.Category "अन्य"}}selected{{end}}>अन्य (Other)</option>
       </select>
     </div>
 
+    <!-- Language / Script -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+      <div class="form-group">
+        <label for="lang">भाषा / Language</label>
+        <select id="lang" name="lang">
+          <option value="">— Select —</option>
+          <option value="en"    {{if eq .Doc.Lang "en"}}selected{{end}}>English</option>
+          <option value="ne"    {{if eq .Doc.Lang "ne"}}selected{{end}}>नेपाली</option>
+          <option value="sa"    {{if eq .Doc.Lang "sa"}}selected{{end}}>संस्कृत</option>
+          <option value="ne-sa" {{if eq .Doc.Lang "ne-sa"}}selected{{end}}>नेपाली + संस्कृत</option>
+          <option value="mixed" {{if eq .Doc.Lang "mixed"}}selected{{end}}>Mixed</option>
+          <option value="other" {{if eq .Doc.Lang "other"}}selected{{end}}>Other</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="script">लिपि / Script</label>
+        <select id="script" name="script">
+          <option value="">— Select —</option>
+          <option value="devanagari" {{if eq .Doc.Script "devanagari"}}selected{{end}}>देवनागरी</option>
+          <option value="latin"      {{if eq .Doc.Script "latin"}}selected{{end}}>Latin / Roman</option>
+          <option value="iast"       {{if eq .Doc.Script "iast"}}selected{{end}}>Latin IAST</option>
+          <option value="mixed"      {{if eq .Doc.Script "mixed"}}selected{{end}}>Mixed</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Original Date -->
+    <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:1rem">
+      <div class="form-group">
+        <label for="orig_year">Original Year / मूल वर्ष</label>
+        <input type="text" id="orig_year" name="orig_year" value="{{.Doc.OrigYear}}" placeholder="e.g. 1815">
+      </div>
+      <div class="form-group">
+        <label for="orig_month">Month / महिना</label>
+        <select id="orig_month" name="orig_month">
+          <option value="">—</option>
+          <option value="01" {{if eq .Doc.OrigMonth "01"}}selected{{end}}>January</option>
+          <option value="02" {{if eq .Doc.OrigMonth "02"}}selected{{end}}>February</option>
+          <option value="03" {{if eq .Doc.OrigMonth "03"}}selected{{end}}>March</option>
+          <option value="04" {{if eq .Doc.OrigMonth "04"}}selected{{end}}>April</option>
+          <option value="05" {{if eq .Doc.OrigMonth "05"}}selected{{end}}>May</option>
+          <option value="06" {{if eq .Doc.OrigMonth "06"}}selected{{end}}>June</option>
+          <option value="07" {{if eq .Doc.OrigMonth "07"}}selected{{end}}>July</option>
+          <option value="08" {{if eq .Doc.OrigMonth "08"}}selected{{end}}>August</option>
+          <option value="09" {{if eq .Doc.OrigMonth "09"}}selected{{end}}>September</option>
+          <option value="10" {{if eq .Doc.OrigMonth "10"}}selected{{end}}>October</option>
+          <option value="11" {{if eq .Doc.OrigMonth "11"}}selected{{end}}>November</option>
+          <option value="12" {{if eq .Doc.OrigMonth "12"}}selected{{end}}>December</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="orig_day">Day / दिन</label>
+        <input type="number" id="orig_day" name="orig_day" value="{{.Doc.OrigDay}}" min="1" max="31">
+      </div>
+    </div>
+
+    <!-- Authors -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+      <div class="form-group">
+        <label for="orig_author">Original Author (English)</label>
+        <input type="text" id="orig_author" name="orig_author" value="{{.Doc.OrigAuthor}}">
+      </div>
+      <div class="form-group">
+        <label for="orig_author_np">Original Author (नेपाली)</label>
+        <input type="text" id="orig_author_np" name="orig_author_np" value="{{.Doc.OrigAuthorNP}}">
+      </div>
+    </div>
+
+    <!-- Description -->
     <div class="form-group">
-      <label for="description">विवरण</label>
+      <label for="description">विवरण / Description</label>
       <textarea id="description" name="description">{{.Doc.Description}}</textarea>
     </div>
 
+    <!-- Body HTML (raw edit for admins) -->
     <div class="form-group">
-      <label>फाइल बदल्नुहोस् (ऐच्छिक)</label>
-      <input type="file" name="file">
+      <label for="body_html">Content Body (HTML)</label>
+      <textarea id="body_html" name="body_html"
+                style="font-family:monospace;font-size:0.85rem;min-height:200px"
+      >{{.Doc.BodyHTML}}</textarea>
+      <div style="font-size:0.78rem;color:#888;margin-top:0.3rem">
+        Raw HTML from the rich text editor. Edit with care.
+      </div>
     </div>
 
     <div style="display:flex;gap:.75rem;flex-wrap:wrap">
       <button type="submit" class="btn btn-primary">परिवर्तन सुरक्षित गर्नुहोस्</button>
-      {{/* TODO: add a DELETE button wired to POST /document/{id}/delete */}}
       <a href="/document/{{.Doc.ID}}" class="btn btn-forest" style="text-decoration:none;line-height:1.6">रद्द गर्नुहोस्</a>
     </div>
   </form>

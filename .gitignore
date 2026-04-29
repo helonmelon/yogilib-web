@@ -1,0 +1,12 @@
+.DS_Store
+**/.DS_Store
+yogilib
+yogilib.db
+yogilib.db-shm
+yogilib.db-wal
+yogilib_test.db
+yogilib_test.db-shm
+yogilib_test.db-wal
+.plan/secrets/
+.plan/access/
+.claude/

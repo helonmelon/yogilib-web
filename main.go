@@ -9,9 +9,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,13 +28,24 @@ import (
 // ---------------------------------------------------------------------------
 
 type Document struct {
-	ID          string
-	Title       string
-	TitleNP     string
-	Category    string
-	Description string
-	FilePath    string
-	CreatedAt   string
+	ID           string
+	Title        string
+	TitleNP      string
+	Slug         string
+	Category     string
+	Description  string
+	BodyHTML     template.HTML
+	BodyText     string
+	Lang         string
+	Script       string
+	OrigAuthor   string
+	OrigAuthorNP string
+	OrigYear     string
+	OrigMonth    string
+	OrigDay      string
+	FilePath     string
+	UploadedBy   int
+	CreatedAt    string
 }
 
 type Excerpt struct {
@@ -55,6 +69,12 @@ type User struct {
 	Role  string // "admin" | "uploader" | "viewer"
 }
 
+// BacklinkEntry is a document that links to the current document.
+type BacklinkEntry struct {
+	ID    int
+	Title string
+}
+
 type PageData struct {
 	Title      string
 	Query      string
@@ -67,7 +87,9 @@ type PageData struct {
 	Excerpts   []Excerpt
 	Exc        *Excerpt
 	StoreItems []StoreItem
-	User       *User // nil when not logged in
+	User       *User        // nil when not logged in
+	Backlinks  []BacklinkEntry
+	TOC        []TOCEntry
 }
 
 // ---------------------------------------------------------------------------
@@ -105,36 +127,86 @@ func initDB(path string) error {
 	PRAGMA foreign_keys=ON;
 
 	CREATE TABLE IF NOT EXISTS documents (
-		id          INTEGER PRIMARY KEY AUTOINCREMENT,
-		title       TEXT NOT NULL,
-		title_np    TEXT,
-		category    TEXT,
-		description TEXT,
-		file_path   TEXT,
-		created_at  TEXT NOT NULL
+		id             INTEGER PRIMARY KEY AUTOINCREMENT,
+		title          TEXT NOT NULL,
+		title_np       TEXT,
+		slug           TEXT,
+		category       TEXT,
+		description    TEXT,
+		body_html      TEXT,
+		body_text      TEXT,
+		lang           TEXT,
+		script         TEXT,
+		orig_author    TEXT,
+		orig_author_np TEXT,
+		orig_year      TEXT,
+		orig_month     TEXT,
+		orig_day       TEXT,
+		file_path      TEXT,
+		uploaded_by    INTEGER,
+		created_at     TEXT NOT NULL
+	);
+
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_slug
+		ON documents(slug)
+		WHERE slug IS NOT NULL AND slug != '';
+
+	CREATE TABLE IF NOT EXISTS revisions (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		doc_id     INTEGER NOT NULL REFERENCES documents(id),
+		title      TEXT,
+		title_np   TEXT,
+		body_html  TEXT,
+		body_text  TEXT,
+		edited_by  INTEGER REFERENCES users(id),
+		edited_at  TEXT NOT NULL,
+		comment    TEXT
+	);
+
+	CREATE TABLE IF NOT EXISTS links (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		from_doc_id  INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+		to_doc_id    INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+		to_slug      TEXT,
+		anchor       TEXT
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_links_from    ON links(from_doc_id);
+	CREATE INDEX IF NOT EXISTS idx_links_to_doc  ON links(to_doc_id);
+	CREATE INDEX IF NOT EXISTS idx_links_to_slug ON links(to_slug);
+
+	CREATE TABLE IF NOT EXISTS authors (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		slug       TEXT UNIQUE NOT NULL,
+		name       TEXT NOT NULL,
+		name_np    TEXT,
+		bio_html   TEXT,
+		born       TEXT,
+		died       TEXT,
+		created_at TEXT NOT NULL
 	);
 
 	CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
-		title, title_np, description,
+		title, title_np, description, body_text,
 		content='documents', content_rowid='id',
 		tokenize='unicode61'
 	);
 
 	CREATE TRIGGER IF NOT EXISTS docs_ai AFTER INSERT ON documents BEGIN
-		INSERT INTO documents_fts(rowid, title, title_np, description)
-		VALUES (new.id, new.title, COALESCE(new.title_np,''), COALESCE(new.description,''));
+		INSERT INTO documents_fts(rowid, title, title_np, description, body_text)
+		VALUES (new.id, new.title, COALESCE(new.title_np,''), COALESCE(new.description,''), COALESCE(new.body_text,''));
 	END;
 
 	CREATE TRIGGER IF NOT EXISTS docs_ad AFTER DELETE ON documents BEGIN
-		INSERT INTO documents_fts(documents_fts, rowid, title, title_np, description)
-		VALUES ('delete', old.id, old.title, COALESCE(old.title_np,''), COALESCE(old.description,''));
+		INSERT INTO documents_fts(documents_fts, rowid, title, title_np, description, body_text)
+		VALUES ('delete', old.id, old.title, COALESCE(old.title_np,''), COALESCE(old.description,''), COALESCE(old.body_text,''));
 	END;
 
 	CREATE TRIGGER IF NOT EXISTS docs_au AFTER UPDATE ON documents BEGIN
-		INSERT INTO documents_fts(documents_fts, rowid, title, title_np, description)
-		VALUES ('delete', old.id, old.title, COALESCE(old.title_np,''), COALESCE(old.description,''));
-		INSERT INTO documents_fts(rowid, title, title_np, description)
-		VALUES (new.id, new.title, COALESCE(new.title_np,''), COALESCE(new.description,''));
+		INSERT INTO documents_fts(documents_fts, rowid, title, title_np, description, body_text)
+		VALUES ('delete', old.id, old.title, COALESCE(old.title_np,''), COALESCE(old.description,''), COALESCE(old.body_text,''));
+		INSERT INTO documents_fts(rowid, title, title_np, description, body_text)
+		VALUES (new.id, new.title, COALESCE(new.title_np,''), COALESCE(new.description,''), COALESCE(new.body_text,''));
 	END;
 
 	CREATE TABLE IF NOT EXISTS users (
@@ -155,8 +227,213 @@ func initDB(path string) error {
 		return fmt.Errorf("schema: %w", err)
 	}
 
+	if err := runMigrations(); err != nil {
+		return fmt.Errorf("migrations: %w", err)
+	}
+
 	return seedData()
 }
+
+// ---------------------------------------------------------------------------
+// Migrations
+// ---------------------------------------------------------------------------
+
+// runMigrations uses PRAGMA user_version to apply schema changes to existing DBs.
+// New DBs get the full schema above; existing DBs get ALTER TABLE patches.
+func runMigrations() error {
+	var version int
+	db.QueryRow("PRAGMA user_version").Scan(&version)
+
+	if version < 1 {
+		if err := migration1(); err != nil {
+			return fmt.Errorf("migration1: %w", err)
+		}
+		if _, err := db.Exec("PRAGMA user_version = 1"); err != nil {
+			return err
+		}
+		log.Println("migration1: applied")
+	}
+
+	if version < 2 {
+		if err := migration2(); err != nil {
+			return fmt.Errorf("migration2: %w", err)
+		}
+		if _, err := db.Exec("PRAGMA user_version = 2"); err != nil {
+			return err
+		}
+		log.Println("migration2: applied")
+	}
+
+	return nil
+}
+
+// migration1: add extended document columns + rebuild FTS5 to include body_text.
+// Safe to run on both old (missing columns) and new (full schema) DBs.
+func migration1() error {
+	// Add new columns — ignore "duplicate column name" if already present
+	newCols := []string{
+		"ALTER TABLE documents ADD COLUMN body_html TEXT",
+		"ALTER TABLE documents ADD COLUMN body_text TEXT",
+		"ALTER TABLE documents ADD COLUMN lang TEXT",
+		"ALTER TABLE documents ADD COLUMN script TEXT",
+		"ALTER TABLE documents ADD COLUMN orig_author TEXT",
+		"ALTER TABLE documents ADD COLUMN orig_author_np TEXT",
+		"ALTER TABLE documents ADD COLUMN orig_year TEXT",
+		"ALTER TABLE documents ADD COLUMN orig_month TEXT",
+		"ALTER TABLE documents ADD COLUMN orig_day TEXT",
+		"ALTER TABLE documents ADD COLUMN uploaded_by INTEGER",
+	}
+	for _, stmt := range newCols {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("%s: %w", stmt, err)
+		}
+	}
+
+	// Rebuild FTS5 table and triggers to include body_text.
+	// Drop old triggers first so they don't fire against the wrong schema.
+	ftsStmts := []string{
+		"DROP TRIGGER IF EXISTS docs_ai",
+		"DROP TRIGGER IF EXISTS docs_ad",
+		"DROP TRIGGER IF EXISTS docs_au",
+		"DROP TABLE IF EXISTS documents_fts",
+		`CREATE VIRTUAL TABLE documents_fts USING fts5(
+			title, title_np, description, body_text,
+			content='documents', content_rowid='id',
+			tokenize='unicode61'
+		)`,
+		`CREATE TRIGGER docs_ai AFTER INSERT ON documents BEGIN
+			INSERT INTO documents_fts(rowid, title, title_np, description, body_text)
+			VALUES (new.id, new.title, COALESCE(new.title_np,''), COALESCE(new.description,''), COALESCE(new.body_text,''));
+		END`,
+		`CREATE TRIGGER docs_ad AFTER DELETE ON documents BEGIN
+			INSERT INTO documents_fts(documents_fts, rowid, title, title_np, description, body_text)
+			VALUES ('delete', old.id, old.title, COALESCE(old.title_np,''), COALESCE(old.description,''), COALESCE(old.body_text,''));
+		END`,
+		`CREATE TRIGGER docs_au AFTER UPDATE ON documents BEGIN
+			INSERT INTO documents_fts(documents_fts, rowid, title, title_np, description, body_text)
+			VALUES ('delete', old.id, old.title, COALESCE(old.title_np,''), COALESCE(old.description,''), COALESCE(old.body_text,''));
+			INSERT INTO documents_fts(rowid, title, title_np, description, body_text)
+			VALUES (new.id, new.title, COALESCE(new.title_np,''), COALESCE(new.description,''), COALESCE(new.body_text,''));
+		END`,
+		// Repopulate from existing rows
+		`INSERT INTO documents_fts(rowid, title, title_np, description, body_text)
+		 SELECT id, title, COALESCE(title_np,''), COALESCE(description,''), COALESCE(body_text,'')
+		 FROM documents`,
+	}
+	for _, stmt := range ftsStmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("FTS rebuild: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// migration2: adds slug column to documents, plus revisions/links/authors tables.
+// Idempotent — ignores "duplicate column name" and "already exists" errors.
+func migration2() error {
+	// 1. Add slug column to documents.
+	if _, err := db.Exec("ALTER TABLE documents ADD COLUMN slug TEXT"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("add slug column: %w", err)
+		}
+	}
+
+	// 2. Partial unique index on slug (allows multiple NULL / empty values).
+	if _, err := db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_slug
+		ON documents(slug)
+		WHERE slug IS NOT NULL AND slug != ''
+	`); err != nil {
+		return fmt.Errorf("idx_documents_slug: %w", err)
+	}
+
+	// 3. New tables.
+	newTables := []string{
+		`CREATE TABLE IF NOT EXISTS revisions (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			doc_id     INTEGER NOT NULL REFERENCES documents(id),
+			title      TEXT,
+			title_np   TEXT,
+			body_html  TEXT,
+			body_text  TEXT,
+			edited_by  INTEGER REFERENCES users(id),
+			edited_at  TEXT NOT NULL,
+			comment    TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS links (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			from_doc_id  INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+			to_doc_id    INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+			to_slug      TEXT,
+			anchor       TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_links_from    ON links(from_doc_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_links_to_doc  ON links(to_doc_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_links_to_slug ON links(to_slug)`,
+		`CREATE TABLE IF NOT EXISTS authors (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			slug       TEXT UNIQUE NOT NULL,
+			name       TEXT NOT NULL,
+			name_np    TEXT,
+			bio_html   TEXT,
+			born       TEXT,
+			died       TEXT,
+			created_at TEXT NOT NULL
+		)`,
+	}
+	for _, stmt := range newTables {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("migration2 table/index: %w", err)
+		}
+	}
+
+	// 4. Backfill slugs for existing documents that don't have one yet.
+	rows, err := db.Query(`SELECT id, title, COALESCE(title_np,'') FROM documents WHERE slug IS NULL OR slug = ''`)
+	if err != nil {
+		return fmt.Errorf("backfill query: %w", err)
+	}
+	type row struct {
+		id      int
+		title   string
+		titleNP string
+	}
+	var toUpdate []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.title, &r.titleNP); err == nil {
+			toUpdate = append(toUpdate, r)
+		}
+	}
+	rows.Close()
+
+	for _, r := range toUpdate {
+		slug := slugify(r.title)
+		if slug == "" {
+			slug = slugify(r.titleNP)
+		}
+		if slug == "" {
+			// Nothing to slugify — leave slug NULL.
+			continue
+		}
+		// Ensure uniqueness: append doc id if a collision would occur.
+		var existing int
+		err := db.QueryRow(`SELECT id FROM documents WHERE slug = ? AND id != ?`, slug, r.id).Scan(&existing)
+		if err == nil {
+			// Collision — make unique.
+			slug = fmt.Sprintf("%s-%d", slug, r.id)
+		}
+		if _, err := db.Exec(`UPDATE documents SET slug = ? WHERE id = ?`, slug, r.id); err != nil {
+			log.Printf("backfill slug for doc %d: %v", r.id, err)
+		}
+	}
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Seed data
+// ---------------------------------------------------------------------------
 
 func seedData() error {
 	var count int
@@ -200,8 +477,59 @@ func seedData() error {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+var reHTMLTags = regexp.MustCompile(`<[^>]+>`)
+
+// stripHTML removes HTML tags, leaving plain text suitable for FTS indexing.
+func stripHTML(s string) string {
+	plain := reHTMLTags.ReplaceAllString(s, " ")
+	// Collapse whitespace
+	return strings.Join(strings.Fields(plain), " ")
+}
+
+// ---------------------------------------------------------------------------
 // DB query functions
 // ---------------------------------------------------------------------------
+
+const docSelectCols = `
+	d.id,
+	d.title,
+	COALESCE(d.title_np,''),
+	COALESCE(d.slug,''),
+	COALESCE(d.category,''),
+	COALESCE(d.description,''),
+	COALESCE(d.body_html,''),
+	COALESCE(d.body_text,''),
+	COALESCE(d.lang,''),
+	COALESCE(d.script,''),
+	COALESCE(d.orig_author,''),
+	COALESCE(d.orig_author_np,''),
+	COALESCE(d.orig_year,''),
+	COALESCE(d.orig_month,''),
+	COALESCE(d.orig_day,''),
+	COALESCE(d.file_path,''),
+	COALESCE(d.uploaded_by,0),
+	d.created_at
+`
+
+func scanDoc(rows interface{ Scan(...any) error }) (Document, error) {
+	var d Document
+	var id int
+	var bodyHTML string
+	err := rows.Scan(
+		&id, &d.Title, &d.TitleNP, &d.Slug, &d.Category, &d.Description,
+		&bodyHTML, &d.BodyText,
+		&d.Lang, &d.Script,
+		&d.OrigAuthor, &d.OrigAuthorNP,
+		&d.OrigYear, &d.OrigMonth, &d.OrigDay,
+		&d.FilePath, &d.UploadedBy, &d.CreatedAt,
+	)
+	d.ID = strconv.Itoa(id)
+	d.BodyHTML = template.HTML(bodyHTML) // trusted: uploaded by authenticated users only
+	return d, err
+}
 
 func queryDocuments(q, cat string) []Document {
 	var rows *sql.Rows
@@ -213,8 +541,7 @@ func queryDocuments(q, cat string) []Document {
 		ftsQuery := strings.TrimSpace(q) + "*" // prefix match
 		if catFilter {
 			rows, err = db.Query(`
-				SELECT d.id, d.title, COALESCE(d.title_np,''), d.category,
-				       COALESCE(d.description,''), COALESCE(d.file_path,''), d.created_at
+				SELECT `+docSelectCols+`
 				FROM documents d
 				WHERE d.id IN (SELECT rowid FROM documents_fts WHERE documents_fts MATCH ?)
 				  AND d.category = ?
@@ -222,8 +549,7 @@ func queryDocuments(q, cat string) []Document {
 			`, ftsQuery, cat)
 		} else {
 			rows, err = db.Query(`
-				SELECT d.id, d.title, COALESCE(d.title_np,''), d.category,
-				       COALESCE(d.description,''), COALESCE(d.file_path,''), d.created_at
+				SELECT `+docSelectCols+`
 				FROM documents d
 				WHERE d.id IN (SELECT rowid FROM documents_fts WHERE documents_fts MATCH ?)
 				ORDER BY d.created_at DESC
@@ -231,16 +557,16 @@ func queryDocuments(q, cat string) []Document {
 		}
 	} else if catFilter {
 		rows, err = db.Query(`
-			SELECT id, title, COALESCE(title_np,''), category,
-			       COALESCE(description,''), COALESCE(file_path,''), created_at
-			FROM documents WHERE category = ?
-			ORDER BY created_at DESC
+			SELECT `+docSelectCols+`
+			FROM documents d
+			WHERE d.category = ?
+			ORDER BY d.created_at DESC
 		`, cat)
 	} else {
 		rows, err = db.Query(`
-			SELECT id, title, COALESCE(title_np,''), category,
-			       COALESCE(description,''), COALESCE(file_path,''), created_at
-			FROM documents ORDER BY created_at DESC
+			SELECT `+docSelectCols+`
+			FROM documents d
+			ORDER BY d.created_at DESC
 		`)
 	}
 
@@ -252,30 +578,26 @@ func queryDocuments(q, cat string) []Document {
 
 	var docs []Document
 	for rows.Next() {
-		var d Document
-		var id int
-		if err := rows.Scan(&id, &d.Title, &d.TitleNP, &d.Category, &d.Description, &d.FilePath, &d.CreatedAt); err != nil {
+		d, err := scanDoc(rows)
+		if err != nil {
 			log.Println("scan:", err)
 			continue
 		}
-		d.ID = strconv.Itoa(id)
 		docs = append(docs, d)
 	}
 	return docs
 }
 
 func getDocumentByID(id string) *Document {
-	var d Document
-	var idInt int
-	err := db.QueryRow(`
-		SELECT id, title, COALESCE(title_np,''), category,
-		       COALESCE(description,''), COALESCE(file_path,''), created_at
-		FROM documents WHERE id = ?
-	`, id).Scan(&idInt, &d.Title, &d.TitleNP, &d.Category, &d.Description, &d.FilePath, &d.CreatedAt)
+	row := db.QueryRow(`
+		SELECT `+docSelectCols+`
+		FROM documents d
+		WHERE d.id = ?
+	`, id)
+	d, err := scanDoc(row)
 	if err != nil {
 		return nil
 	}
-	d.ID = strconv.Itoa(idInt)
 	return &d
 }
 
@@ -298,6 +620,51 @@ func getExcerptBySlug(slug string) *Excerpt {
 		return nil
 	}
 	return &Excerpt{Slug: slug, Title: "Treaty of Sugowlee, Dec. 2, 1815", Body: b}
+}
+
+// getBacklinks returns documents that link to the given document ID.
+func getBacklinks(docID string) []BacklinkEntry {
+	rows, err := db.Query(`
+		SELECT d.id, d.title
+		FROM links l
+		JOIN documents d ON d.id = l.from_doc_id
+		WHERE l.to_doc_id = ?
+		ORDER BY d.title ASC
+	`, docID)
+	if err != nil {
+		log.Println("getBacklinks:", err)
+		return nil
+	}
+	defer rows.Close()
+	var out []BacklinkEntry
+	for rows.Next() {
+		var e BacklinkEntry
+		if err := rows.Scan(&e.ID, &e.Title); err == nil {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// saveLinksForDoc persists wiki-link refs for a document within a transaction.
+// It first deletes all existing link rows for the doc, then re-inserts.
+func saveLinksForDoc(tx *sql.Tx, docID int64, refs []LinkRef) error {
+	if _, err := tx.Exec(`DELETE FROM links WHERE from_doc_id = ?`, docID); err != nil {
+		return err
+	}
+	for _, ref := range refs {
+		var toDocID interface{}
+		if ref.ToDocID != nil {
+			toDocID = *ref.ToDocID
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO links (from_doc_id, to_doc_id, to_slug, anchor) VALUES (?, ?, ?, ?)`,
+			docID, toDocID, ref.ToSlug, ref.Anchor,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -454,7 +821,21 @@ func documentHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	render(w, r, "document", PageData{Title: doc.Title, Doc: doc})
+
+	// Inject TOC heading IDs at read time (presentational, not stored).
+	var toc []TOCEntry
+	if doc.BodyHTML != "" {
+		newHTML, entries := extractTOC(string(doc.BodyHTML))
+		doc.BodyHTML = template.HTML(newHTML)
+		toc = entries
+	}
+
+	render(w, r, "document", PageData{
+		Title:     doc.Title,
+		Doc:       doc,
+		Backlinks: getBacklinks(id),
+		TOC:       toc,
+	})
 }
 
 func editGetHandler(w http.ResponseWriter, r *http.Request) {
@@ -473,14 +854,99 @@ func editPostHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
-	_, err := db.Exec(`
-		UPDATE documents SET title=?, title_np=?, category=?, description=? WHERE id=?
-	`, r.FormValue("title"), r.FormValue("title_np"), r.FormValue("category"), r.FormValue("description"), id)
+
+	title := r.FormValue("title")
+	titleNP := r.FormValue("title_np")
+
+	// Parse wiki links before storing.
+	rawBody := r.FormValue("body_html")
+	renderedBody, refs := parseWikiLinks(rawBody)
+	bodyText := stripHTML(renderedBody)
+
+	slug := slugify(title)
+	if slug == "" {
+		slug = slugify(titleNP)
+	}
+
+	docID, _ := strconv.Atoi(id)
+	editedBy := 0
+	if u := sessionUser(r); u != nil {
+		editedBy = u.ID
+	}
+
+	tx, err := db.Begin()
 	if err != nil {
-		log.Println("editPost:", err)
+		log.Println("editPost begin tx:", err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
+
+	_, err = tx.Exec(`
+		UPDATE documents SET
+			title          = ?,
+			title_np       = ?,
+			slug           = ?,
+			category       = ?,
+			description    = ?,
+			lang           = ?,
+			script         = ?,
+			orig_author    = ?,
+			orig_author_np = ?,
+			orig_year      = ?,
+			orig_month     = ?,
+			orig_day       = ?,
+			body_html      = ?,
+			body_text      = ?
+		WHERE id = ?
+	`,
+		title, titleNP, slug,
+		r.FormValue("category"),
+		r.FormValue("description"),
+		r.FormValue("lang"),
+		r.FormValue("script"),
+		r.FormValue("orig_author"),
+		r.FormValue("orig_author_np"),
+		r.FormValue("orig_year"),
+		r.FormValue("orig_month"),
+		r.FormValue("orig_day"),
+		renderedBody, bodyText,
+		id,
+	)
+	if err != nil {
+		tx.Rollback()
+		log.Println("editPost update:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	// Save revision (post-write state).
+	_, err = tx.Exec(
+		`INSERT INTO revisions (doc_id, title, title_np, body_html, body_text, edited_by, edited_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		docID, title, titleNP, renderedBody, bodyText, editedBy,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		tx.Rollback()
+		log.Println("editPost revision:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	// Rewrite links table for this document.
+	if err := saveLinksForDoc(tx, int64(docID), refs); err != nil {
+		tx.Rollback()
+		log.Println("editPost links:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Println("editPost commit:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
 	http.Redirect(w, r, "/document/"+id, http.StatusSeeOther)
 }
 
@@ -489,27 +955,138 @@ func uploadGetHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func uploadPostHandler(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
+	const maxUploadSize = 50 << 20 // 50 MB
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
-	title := r.FormValue("title")
+
+	title := strings.TrimSpace(r.FormValue("title"))
 	if title == "" {
 		render(w, r, "upload", PageData{Title: "Contribute — योगदान", Error: "Title is required."})
 		return
 	}
-	result, err := db.Exec(`
-		INSERT INTO documents (title, title_np, category, description, file_path, created_at)
-		VALUES (?, ?, ?, ?, '', ?)
-	`, title, r.FormValue("title_np"), r.FormValue("category"), r.FormValue("description"),
-		time.Now().Format("2 Jan 2006"))
+
+	// Handle optional file attachment
+	filePath := ""
+	file, header, fileErr := r.FormFile("file")
+	if fileErr == nil {
+		defer file.Close()
+
+		// Ensure upload directory exists
+		if err := os.MkdirAll("static/docs", 0755); err != nil {
+			log.Println("mkdir static/docs:", err)
+			http.Error(w, "Server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Build a unique filename: timestamp + original name
+		ext := filepath.Ext(header.Filename)
+		safeName := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
+		dst := filepath.Join("static", "docs", safeName)
+
+		out, err := os.Create(dst)
+		if err != nil {
+			log.Println("create file:", err)
+			http.Error(w, "Server error", http.StatusInternalServerError)
+			return
+		}
+		defer out.Close()
+
+		if _, err := io.Copy(out, file); err != nil {
+			log.Println("copy file:", err)
+			http.Error(w, "Server error", http.StatusInternalServerError)
+			return
+		}
+		filePath = "/static/docs/" + safeName
+	}
+
+	// Body content from Quill — parse wiki links before storing.
+	titleNP := r.FormValue("title_np")
+	rawBody := r.FormValue("body_html")
+	renderedBody, refs := parseWikiLinks(rawBody)
+	bodyText := stripHTML(renderedBody)
+
+	slug := slugify(title)
+	if slug == "" {
+		slug = slugify(titleNP)
+	}
+
+	// Uploader attribution.
+	uploadedBy := 0
+	if u := sessionUser(r); u != nil {
+		uploadedBy = u.ID
+	}
+
+	tx, err := db.Begin()
 	if err != nil {
-		log.Println("uploadPost:", err)
+		log.Println("uploadPost begin tx:", err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	id, _ := result.LastInsertId()
-	http.Redirect(w, r, "/document/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
+
+	result, err := tx.Exec(`
+		INSERT INTO documents (
+			title, title_np, slug, category, description,
+			body_html, body_text,
+			lang, script,
+			orig_author, orig_author_np,
+			orig_year, orig_month, orig_day,
+			file_path, uploaded_by, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		title, titleNP, slug,
+		r.FormValue("category"),
+		r.FormValue("description"),
+		renderedBody, bodyText,
+		r.FormValue("doc_lang"),
+		r.FormValue("script"),
+		r.FormValue("orig_author"),
+		r.FormValue("orig_author_np"),
+		r.FormValue("orig_year"),
+		r.FormValue("orig_month"),
+		r.FormValue("orig_day"),
+		filePath, uploadedBy,
+		time.Now().Format("2 Jan 2006"),
+	)
+	if err != nil {
+		tx.Rollback()
+		log.Println("uploadPost insert:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	docID, _ := result.LastInsertId()
+
+	// Save initial revision.
+	_, err = tx.Exec(
+		`INSERT INTO revisions (doc_id, title, title_np, body_html, body_text, edited_by, edited_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		docID, title, titleNP, renderedBody, bodyText, uploadedBy,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		tx.Rollback()
+		log.Println("uploadPost revision:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	// Save wiki links.
+	if err := saveLinksForDoc(tx, docID, refs); err != nil {
+		tx.Rollback()
+		log.Println("uploadPost links:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Println("uploadPost commit:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/document/"+strconv.FormatInt(docID, 10), http.StatusSeeOther)
 }
 
 func missionHandler(w http.ResponseWriter, r *http.Request) {

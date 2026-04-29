@@ -584,6 +584,115 @@ main { padding-bottom: 3rem; }
 .store-item h3 { font-size: 0.97rem; margin: 0.25rem 0; }
 .store-item p { font-size: 0.85rem; color: var(--muted); margin: 0 0 0.5rem; }
 
+/* --- Wiki links ----------------------------------------- */
+
+a.wikilink {
+  /* Resolved links: inherit normal link colour (var(--red)) */
+  color: var(--red);
+}
+
+a.wikilink.wanted {
+  /* Unresolved / wanted links: red text, dashed underline */
+  color: #c0392b;
+  text-decoration: underline dashed #c0392b;
+}
+
+a.wikilink.wanted:hover {
+  color: var(--hover-blue);
+  text-decoration: underline dashed var(--hover-blue);
+}
+
+/* --- Table of Contents (TOC) ----------------------------- */
+
+.toc {
+  background: #f8f7f4;
+  border: 1px solid var(--border);
+  display: inline-block;
+  min-width: 200px;
+  max-width: 380px;
+  padding: 0.75rem 1.25rem 1rem;
+  margin: 1.25rem 0;
+  font-size: 0.9rem;
+}
+
+.toc-title {
+  font-weight: 600;
+  font-size: 0.88rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+
+.toc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  counter-reset: toc-h2;
+}
+
+.toc-list li {
+  margin: 0.2rem 0;
+  line-height: 1.4;
+}
+
+.toc-list li a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.toc-list li a:hover {
+  color: var(--hover-blue);
+  text-decoration: underline;
+}
+
+.toc-level-2 {
+  padding-left: 0;
+}
+
+.toc-level-3 {
+  padding-left: 1.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* --- Backlinks ------------------------------------------- */
+
+.backlinks {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+  margin-top: 2rem;
+  font-size: 0.88rem;
+}
+
+.backlinks-summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.82rem;
+  user-select: none;
+}
+
+.backlinks-summary:hover { color: var(--ink); }
+
+.backlinks-list {
+  list-style: none;
+  padding: 0.5rem 0 0 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.25rem;
+}
+
+.backlinks-list li a {
+  color: var(--red);
+  text-decoration: none;
+}
+
+.backlinks-list li a:hover { text-decoration: underline; }
+
 /* --- Flash messages ------------------------------------- */
 
 .flash { padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.9rem; }

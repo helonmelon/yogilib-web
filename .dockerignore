@@ -1,0 +1,6 @@
+yogilib
+yogilib.db
+yogilib.db-shm
+yogilib.db-wal
+fly.toml
+.git
