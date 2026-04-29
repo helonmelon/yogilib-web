@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -88,13 +89,16 @@ type PageData struct {
 	Exc        *Excerpt
 	StoreItems []StoreItem
 	User       *User        // nil when not logged in
-	Backlinks   []BacklinkEntry
-	TOC         []TOCEntry
-	Revisions   []RevisionEntry
-	RevA        *RevisionEntry
-	RevB        *RevisionEntry
-	Diff        []DiffLine
-	WantedLinks []WantedEntry
+	Backlinks       []BacklinkEntry
+	TOC             []TOCEntry
+	Revisions       []RevisionEntry
+	RevA            *RevisionEntry
+	RevB            *RevisionEntry
+	Diff            []DiffLine
+	WantedLinks     []WantedEntry
+	Summary         string
+	Entities        []entityEntry
+	LinkSuggestions []linkSuggEntry
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +272,16 @@ func runMigrations() error {
 			return err
 		}
 		log.Println("migration2: applied")
+	}
+
+	if version < 3 {
+		if err := migration3(); err != nil {
+			return fmt.Errorf("migration3: %w", err)
+		}
+		if _, err := db.Exec("PRAGMA user_version = 3"); err != nil {
+			return err
+		}
+		log.Println("migration3: applied")
 	}
 
 	return nil
@@ -837,10 +851,13 @@ func documentHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render(w, r, "document", PageData{
-		Title:     doc.Title,
-		Doc:       doc,
-		Backlinks: getBacklinks(id),
-		TOC:       toc,
+		Title:           doc.Title,
+		Doc:             doc,
+		Backlinks:       getBacklinks(id),
+		TOC:             toc,
+		Summary:         getDocSummary(id),
+		Entities:        getDocEntities(id),
+		LinkSuggestions: getLinkSuggestionsForDoc(id),
 	})
 }
 
@@ -1215,6 +1232,17 @@ func main() {
 	mux.HandleFunc("POST /document/{id}/revisions/{rev}/rollback",
 		requireRole("admin", revisionRollbackHandler))
 	mux.HandleFunc("GET /wanted", wantedHandler)
+
+	// Admin: enrichment status (read-only) + manual trigger.
+	mux.HandleFunc("GET /admin/enrich", requireRole("admin", enrichStatusHandler))
+	mux.HandleFunc("POST /admin/enrich/run", requireRole("admin", enrichRunHandler))
+
+	// Kick off the local-model enrichment worker (background).
+	// Disable with ENRICH_DISABLED=1 if Ollama isn't available.
+	if os.Getenv("ENRICH_DISABLED") != "1" {
+		startEnrichWorker(context.Background())
+		log.Printf("%s scheduled (ollama=%s)", enrichGoroutineName, ollamaURL())
+	}
 
 	log.Printf("yogilib → http://localhost:%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, mux))

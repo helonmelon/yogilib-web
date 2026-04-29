@@ -709,3 +709,12 @@ footer {
   border-top: 1px solid var(--border);
   margin-top: 2rem;
 }
+
+/* --- AI enrichment (local-model output) --- */
+.entity-person { background: #e8f0ff !important; color: #1f3a8a !important; }
+.entity-place  { background: #e8f7e8 !important; color: #1f5a2a !important; }
+.entity-work   { background: #fef0d8 !important; color: #7a5520 !important; }
+.entity-date   { background: #f8e8f8 !important; color: #5a2d7a !important; }
+.entity-other  { background: #efeae0 !important; color: #555 !important; }
+
+.ai-summary { font-family: 'Labrada', Georgia, serif; }

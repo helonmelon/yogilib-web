@@ -50,6 +50,16 @@
 
     <!-- Short description -->
     {{if .Doc.Description}}<p style="margin-top:.75rem">{{.Doc.Description}}</p>{{end}}
+
+    <!-- AI summary (local model). Auto-generated; admin can ignore. -->
+    {{if .Summary}}
+    <aside class="ai-summary" style="margin-top:1rem;padding:.85rem 1.1rem;background:#f4f1e8;border-left:3px solid #8a7140;font-size:.95rem;line-height:1.55">
+      <div style="font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:#8a7140;margin-bottom:.3rem">
+        TL;DR <span style="color:#aaa;text-transform:none;letter-spacing:0">— generated locally by llama3.1:8b</span>
+      </div>
+      {{.Summary}}
+    </aside>
+    {{end}}
   </div>
 
   <!-- Table of contents (only when 3+ headings) -->
@@ -85,6 +95,39 @@
   <p style="color:#888;text-align:center;padding:3rem 0">
     अहिलेसम्म कुनै फाइल थपिएको छैन।
   </p>
+  {{end}}
+
+  <!-- Suggested links (admin-only): pending wiki-link suggestions from the local model. -->
+  {{if and .User (eq .User.Role "admin") .LinkSuggestions}}
+  <details class="link-suggestions" style="margin-top:2rem;padding:.6rem 1rem;background:#fdf6e6;border:1px dashed #c89b3f">
+    <summary style="cursor:pointer;font-weight:600;color:#7a5a1f">
+      🔗 Suggested links ({{len .LinkSuggestions}})
+      <span style="color:#888;font-weight:400;font-size:.85rem">— admin-only, from embedding similarity</span>
+    </summary>
+    <ul style="margin:.5rem 0 0 1rem;font-size:.92rem;line-height:1.7">
+      {{range .LinkSuggestions}}
+      <li>
+        <a href="/document/{{.ToID}}">{{.Title}}</a>
+        <span style="color:#888;font-size:.82rem">(similarity {{printf "%.2f" .Score}})</span>
+      </li>
+      {{end}}
+    </ul>
+  </details>
+  {{end}}
+
+  <!-- Extracted entities (people, places, works mentioned) -->
+  {{if .Entities}}
+  <section class="doc-entities" style="margin-top:2rem">
+    <h3 style="font-size:1rem;color:#555;margin-bottom:.5rem">Mentioned</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem">
+      {{range .Entities}}
+      <span class="entity entity-{{.Kind}}"
+            style="font-size:.82rem;padding:2px 8px;border-radius:10px;background:#eee;color:#333"
+            title="{{.Kind}}">{{.Value}}</span>
+      {{end}}
+    </div>
+    <div style="font-size:.72rem;color:#aaa;margin-top:.3rem">extracted locally by llama3.1:8b</div>
+  </section>
   {{end}}
 
   <!-- Backlinks: "What links here" -->
