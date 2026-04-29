@@ -88,8 +88,13 @@ type PageData struct {
 	Exc        *Excerpt
 	StoreItems []StoreItem
 	User       *User        // nil when not logged in
-	Backlinks  []BacklinkEntry
-	TOC        []TOCEntry
+	Backlinks   []BacklinkEntry
+	TOC         []TOCEntry
+	Revisions   []RevisionEntry
+	RevA        *RevisionEntry
+	RevB        *RevisionEntry
+	Diff        []DiffLine
+	WantedLinks []WantedEntry
 }
 
 // ---------------------------------------------------------------------------
@@ -920,12 +925,13 @@ func editPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Save revision (post-write state).
+	// Save revision (post-write state). Comment is optional but encouraged.
+	editComment := strings.TrimSpace(r.FormValue("edit_comment"))
 	_, err = tx.Exec(
-		`INSERT INTO revisions (doc_id, title, title_np, body_html, body_text, edited_by, edited_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO revisions (doc_id, title, title_np, body_html, body_text, edited_by, edited_at, comment)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		docID, title, titleNP, renderedBody, bodyText, editedBy,
-		time.Now().UTC().Format(time.RFC3339),
+		time.Now().UTC().Format(time.RFC3339), editComment,
 	)
 	if err != nil {
 		tx.Rollback()
@@ -1059,12 +1065,12 @@ func uploadPostHandler(w http.ResponseWriter, r *http.Request) {
 
 	docID, _ := result.LastInsertId()
 
-	// Save initial revision.
+	// Save initial revision (comment defaults to "initial upload").
 	_, err = tx.Exec(
-		`INSERT INTO revisions (doc_id, title, title_np, body_html, body_text, edited_by, edited_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO revisions (doc_id, title, title_np, body_html, body_text, edited_by, edited_at, comment)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		docID, title, titleNP, renderedBody, bodyText, uploadedBy,
-		time.Now().UTC().Format(time.RFC3339),
+		time.Now().UTC().Format(time.RFC3339), "initial upload",
 	)
 	if err != nil {
 		tx.Rollback()
@@ -1202,6 +1208,13 @@ func main() {
 	mux.HandleFunc("GET /dashboard", requireRole("admin", dashboardHandler))
 	mux.HandleFunc("GET /document/{id}/edit", requireRole("admin", editGetHandler))
 	mux.HandleFunc("POST /document/{id}/edit", requireRole("admin", editPostHandler))
+
+	// Day 3: revision history, diff, rollback, wanted links.
+	mux.HandleFunc("GET /document/{id}/history", historyHandler)
+	mux.HandleFunc("GET /document/{id}/diff", revisionDiffHandler)
+	mux.HandleFunc("POST /document/{id}/revisions/{rev}/rollback",
+		requireRole("admin", revisionRollbackHandler))
+	mux.HandleFunc("GET /wanted", wantedHandler)
 
 	log.Printf("yogilib → http://localhost:%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, mux))

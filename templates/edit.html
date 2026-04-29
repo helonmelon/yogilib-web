@@ -118,7 +118,17 @@
       </div>
     </div>
 
-    <div style="display:flex;gap:.75rem;flex-wrap:wrap">
+    <div class="field" style="margin-top:1rem">
+      <label for="edit_comment">
+        Edit summary
+        <span style="color:#888;font-weight:400;font-size:.85rem">(brief description of what changed)</span>
+      </label>
+      <input type="text" id="edit_comment" name="edit_comment"
+             placeholder="e.g. fixed typo in opening paragraph"
+             style="width:100%;padding:.5rem;font-family:inherit;font-size:.95rem;border:1px solid #d4c5a4">
+    </div>
+
+    <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-top:1rem">
       <button type="submit" class="btn btn-primary">परिवर्तन सुरक्षित गर्नुहोस्</button>
       <a href="/document/{{.Doc.ID}}" class="btn btn-forest" style="text-decoration:none;line-height:1.6">रद्द गर्नुहोस्</a>
     </div>
