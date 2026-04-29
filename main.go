@@ -147,9 +147,10 @@ func initDB(path string) error {
 		created_at     TEXT NOT NULL
 	);
 
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_slug
-		ON documents(slug)
-		WHERE slug IS NOT NULL AND slug != '';
+	-- NOTE: the unique index on documents.slug is created by migration2,
+	-- not here. On an existing pre-migration2 database the documents
+	-- table won't yet have a slug column when this inline schema runs,
+	-- so creating the index here would fail.
 
 	CREATE TABLE IF NOT EXISTS revisions (
 		id         INTEGER PRIMARY KEY AUTOINCREMENT,

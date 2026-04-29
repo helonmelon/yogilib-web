@@ -44,7 +44,10 @@ func slugify(s string) string {
 	prevHyphen := true // start true to trim leading hyphens
 	for _, r := range s {
 		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
+		case unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r):
+			// IsMark covers Devanagari combining vowel signs (matras) and
+			// nukta/virama — dropping them mangles words like
+			// "सुगौली" → "सगल".
 			b.WriteRune(r)
 			prevHyphen = false
 		case unicode.IsSpace(r) || r == '-' || r == '_':
