@@ -2,21 +2,75 @@
 
 A digital archive for the works of **Yogi Narharinath** (योगी नरहरिनाथ) — Nepali scholar, historian, and religious figure. The site lets visitors browse, search, and read historical documents in English, Nepali, and Sanskrit, and lets contributors upload new material.
 
-Built with **Go** using `net/http` and `html/template`. Every page is server-rendered. The database is **SQLite with FTS5** (full-text search) — embedded, zero-config, single file.
+Built with **Go** (`net/http`) for the API + a **SvelteKit** SPA for the UI. Both are shipped as a single Go binary — the SvelteKit build is `//go:embed`-ed into the executable, so deployment is one file plus a SQLite DB.
+
+The database is **SQLite with FTS5** (full-text search) — embedded, zero-config.
 
 ---
 
 ## Quick start
 
+The canonical build path goes through the Makefile:
+
 ```bash
-go mod tidy             # install dependencies
-go run main.go          # dev server at http://localhost:8080
-go build -o yogilib .   # production binary
-PORT=9000 ./yogilib     # custom port
-DB_PATH=/data/yogi.db ./yogilib   # custom DB location (default: yogilib.db)
+make build              # 1) npm run build in ../yogilib-sveltekit
+                        # 2) sync build/ → webdist/
+                        # 3) go build -o yogilib .
+./yogilib               # serves SPA + API on http://localhost:8080
 ```
 
-Requires **Go 1.22+**.
+Manual / dev-only equivalents:
+
+```bash
+go mod tidy             # install Go deps
+cd ../yogilib-sveltekit && npm ci && npm run build && cd -
+rm -rf webdist && cp -r ../yogilib-sveltekit/build/. webdist/
+go build -o yogilib .   # produces single self-contained binary
+```
+
+Env knobs:
+
+```bash
+PORT=9000 ./yogilib              # custom port (default 8080)
+DB_PATH=/data/yogi.db ./yogilib  # custom DB path (default yogilib.db)
+LEGACY_HTML=1 ./yogilib          # also enable old html/template routes
+ENRICH_DISABLED=1 ./yogilib      # skip Ollama background worker
+OLLAMA_URL=http://host:11434 ./yogilib   # remote Ollama
+```
+
+Requires **Go 1.22+** and **Node 18+** (only at build time).
+
+### Architecture (Phase 6)
+
+```
+Browser —→ Go binary :8080
+             ├─ /api/v1/*   JSON API (auth, documents, excerpts, admin, ...)
+             ├─ /static/*   uploaded artefacts (filesystem)
+             └─ / (catch-all) embedded SvelteKit SPA — client-side routing
+```
+
+The legacy `html/template` routes still live in the codebase but are gated behind `LEGACY_HTML=1` (off by default). The SPA owns `/` in production.
+
+### Deployment (WSL / live server)
+
+```bash
+# On the host (build):
+cd ~/.openclaw/workspace/yogilib/yogilib-web
+make build
+
+# Stop any previous instance:
+systemctl --user stop yogilib-live.scope 2>/dev/null || true
+
+# Start under systemd-run so it survives the SSH channel closing:
+systemd-run --user --scope --unit=yogilib-live --collect \
+    bash -c 'cd ~/.openclaw/workspace/yogilib/yogilib-web && \
+             env PORT=8080 ./yogilib >> yogilib.log 2>&1'
+
+# Tail logs:
+tail -f ~/.openclaw/workspace/yogilib/yogilib-web/yogilib.log
+```
+
+Live URL (Tailscale MagicDNS): <http://dofdot.tail462907.ts.net:8080>
 
 ---
 

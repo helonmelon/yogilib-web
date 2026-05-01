@@ -1,6 +1,22 @@
 // yogilib — Go HTTP server
 // Run:   go run main.go
 // Build: go build -o yogilib .
+//
+// Phase-1 layout (Opus 2026-05-01):
+//   main.go          — wiring, env, mux setup, legacy types, legacy HTML
+//                       handlers (kept here until Phase 5 strips them).
+//   models.go        — Api* request/response structs (JSON shapes).
+//   auth.go          — extractAuth (cookie-or-bearer), lookupSession.
+//   api_common.go    — write helpers, error codes, middleware,
+//                       registerAPIv1Routes.
+//   api_auth.go      — /api/v1/auth/{login,logout,me}
+//   api_documents.go — /api/v1/documents{,/{id}{,/revisions,/diff,
+//                       /revisions/{rev}/rollback}}
+//   api_excerpts.go  — /api/v1/excerpts{,/{slug}}
+//   api_wanted.go    — /api/v1/wanted
+//   api_meta.go      — /api/v1/health, /api/v1/categories
+//   api_admin.go     — /api/v1/admin/enrich/{status,run}
+//   spa.go           — SvelteKit SPA fallback (env: SPA_DIR, SPA_ROOT).
 package main
 
 import (
@@ -1215,39 +1231,50 @@ func main() {
 
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
-	// Public — no login needed
-	mux.HandleFunc("GET /{$}", indexHandler)
-	mux.HandleFunc("GET /about", aboutHandler)
-	mux.HandleFunc("GET /works", worksHandler)
-	mux.HandleFunc("GET /excerpts", excerptsHandler)
-	mux.HandleFunc("GET /excerpts/{slug}", excerptHandler)
-	mux.HandleFunc("GET /document/{id}", documentHandler)
-	mux.HandleFunc("GET /mission", missionHandler)
-	mux.HandleFunc("GET /similar", similarHandler)
-	mux.HandleFunc("GET /store", storeHandler)
-	mux.HandleFunc("GET /login", loginGetHandler)
-	mux.HandleFunc("POST /login", loginPostHandler)
-	mux.HandleFunc("POST /logout", logoutHandler)
+	// --- v1 JSON API ---
+	registerAPIv1Routes(mux)
 
-	// Uploader+ only
-	mux.HandleFunc("GET /upload", requireRole("uploader", uploadGetHandler))
-	mux.HandleFunc("POST /upload", requireRole("uploader", uploadPostHandler))
+	// --- Legacy HTML routes ---
+	// Phase 6: Svelte SPA owns /. Legacy template routes are gated behind
+	// LEGACY_HTML=1 (off by default) so the SPA can serve all pages
+	// client-side. The /api/v1/* and /static/* routes still take precedence
+	// thanks to http.ServeMux pattern specificity.
+	if os.Getenv("LEGACY_HTML") == "1" {
+		mux.HandleFunc("GET /{$}", indexHandler)
+		mux.HandleFunc("GET /about", aboutHandler)
+		mux.HandleFunc("GET /works", worksHandler)
+		mux.HandleFunc("GET /excerpts", excerptsHandler)
+		mux.HandleFunc("GET /excerpts/{slug}", excerptHandler)
+		mux.HandleFunc("GET /document/{id}", documentHandler)
+		mux.HandleFunc("GET /mission", missionHandler)
+		mux.HandleFunc("GET /similar", similarHandler)
+		mux.HandleFunc("GET /store", storeHandler)
+		mux.HandleFunc("GET /login", loginGetHandler)
+		mux.HandleFunc("POST /login", loginPostHandler)
+		mux.HandleFunc("POST /logout", logoutHandler)
 
-	// Admin only
-	mux.HandleFunc("GET /dashboard", requireRole("admin", dashboardHandler))
-	mux.HandleFunc("GET /document/{id}/edit", requireRole("admin", editGetHandler))
-	mux.HandleFunc("POST /document/{id}/edit", requireRole("admin", editPostHandler))
+		mux.HandleFunc("GET /upload", requireRole("uploader", uploadGetHandler))
+		mux.HandleFunc("POST /upload", requireRole("uploader", uploadPostHandler))
 
-	// Day 3: revision history, diff, rollback, wanted links.
-	mux.HandleFunc("GET /document/{id}/history", historyHandler)
-	mux.HandleFunc("GET /document/{id}/diff", revisionDiffHandler)
-	mux.HandleFunc("POST /document/{id}/revisions/{rev}/rollback",
-		requireRole("admin", revisionRollbackHandler))
-	mux.HandleFunc("GET /wanted", wantedHandler)
+		mux.HandleFunc("GET /dashboard", requireRole("admin", dashboardHandler))
+		mux.HandleFunc("GET /document/{id}/edit", requireRole("admin", editGetHandler))
+		mux.HandleFunc("POST /document/{id}/edit", requireRole("admin", editPostHandler))
 
-	// Admin: enrichment status (read-only) + manual trigger.
-	mux.HandleFunc("GET /admin/enrich", requireRole("admin", enrichStatusHandler))
-	mux.HandleFunc("POST /admin/enrich/run", requireRole("admin", enrichRunHandler))
+		mux.HandleFunc("GET /document/{id}/history", historyHandler)
+		mux.HandleFunc("GET /document/{id}/diff", revisionDiffHandler)
+		mux.HandleFunc("POST /document/{id}/revisions/{rev}/rollback",
+			requireRole("admin", revisionRollbackHandler))
+		mux.HandleFunc("GET /wanted", wantedHandler)
+
+		mux.HandleFunc("GET /admin/enrich", requireRole("admin", enrichStatusHandler))
+		mux.HandleFunc("POST /admin/enrich/run", requireRole("admin", enrichRunHandler))
+		log.Printf("legacy HTML routes enabled (LEGACY_HTML=1)")
+	}
+
+	// --- SPA (SvelteKit build, embedded) ---
+	spaHandler := newSPAHandler()
+	mux.Handle("/", spaHandler)
+	log.Printf("SPA: serving embedded SvelteKit build at /")
 
 	// Kick off the local-model enrichment worker (background).
 	// Disable with ENRICH_DISABLED=1 if Ollama isn't available.
